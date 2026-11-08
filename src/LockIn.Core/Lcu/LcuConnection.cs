@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
 using Microsoft.Extensions.Hosting;
@@ -102,13 +103,7 @@ public sealed class LcuConnection(LcuLocator locator, ILogger<LcuConnection> log
             return; // Client exited while starting up.
         }
 
-        using var socket = new ClientWebSocket();
-        socket.Options.RemoteCertificateValidationCallback = LcuCertificate.Callback;
-        socket.Options.SetRequestHeader("Authorization", LcuClient.CreateAuthHeader(lockfile).ToString());
-        socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
-
-        var scheme = lockfile.Protocol == "https" ? "wss" : "ws";
-        await socket.ConnectAsync(new Uri($"{scheme}://127.0.0.1:{lockfile.Port}/"), stoppingToken).ConfigureAwait(false);
+        using var socket = await ConnectSocketAsync(lockfile, stoppingToken).ConfigureAwait(false);
 
         foreach (var uri in LcuEndpoints.Subscribed)
         {
@@ -122,6 +117,41 @@ public sealed class LcuConnection(LcuLocator locator, ILogger<LcuConnection> log
         SetState(LcuConnectionState.Connected);
 
         await ReceiveLoopAsync(socket, stoppingToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Opens the event socket. The client speaks WAMP; ask for that subprotocol first and fall back to a
+    /// plain connection if the server doesn't negotiate it.
+    /// </summary>
+    private async Task<ClientWebSocket> ConnectSocketAsync(LcuLockfile lockfile, CancellationToken stoppingToken)
+    {
+        var scheme = lockfile.Protocol == "https" ? "wss" : "ws";
+        var uri = new Uri($"{scheme}://127.0.0.1:{lockfile.Port}/");
+        foreach (var subProtocol in new[] { "wamp", null })
+        {
+            var socket = new ClientWebSocket();
+            socket.Options.RemoteCertificateValidationCallback = LcuCertificate.Callback;
+            socket.Options.SetRequestHeader("Authorization", LcuClient.CreateAuthHeader(lockfile).ToString());
+            socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+            if (subProtocol is not null)
+            {
+                socket.Options.AddSubProtocol(subProtocol);
+            }
+
+            try
+            {
+                await socket.ConnectAsync(uri, stoppingToken).ConfigureAwait(false);
+                logger.LogDebug("Event socket connected ({SubProtocol})", socket.SubProtocol ?? "no subprotocol");
+                return socket;
+            }
+            catch (WebSocketException ex) when (subProtocol is not null)
+            {
+                logger.LogDebug("Event socket with subprotocol {SubProtocol} failed ({Message}); retrying without", subProtocol, ex.Message);
+                socket.Dispose();
+            }
+        }
+
+        throw new UnreachableException();
     }
 
     /// <summary>The client's API answers before the player is fully loaded; wait until we can read who is logged in.</summary>

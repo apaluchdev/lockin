@@ -7,6 +7,7 @@ using LockIn.Core;
 using LockIn.Core.Gameflow;
 using LockIn.Core.Hosting;
 using LockIn.Core.Lcu;
+using LockIn.Core.Matchmaking;
 using LockIn.Core.Settings;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -92,6 +93,7 @@ public partial class App : Application
         services.AddSingleton<LcuLocator>();
         services.AddHostedSingleton<LcuConnection>();
         services.AddHostedSingleton<GameflowMonitor>();
+        services.AddHostedSingleton<AutoAcceptService>();
 
         // App services
         services.AddSingleton<StartupRegistration>();
