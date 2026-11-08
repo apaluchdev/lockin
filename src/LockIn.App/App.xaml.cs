@@ -5,6 +5,7 @@ using LockIn.App.Services;
 using LockIn.App.ViewModels;
 using LockIn.Core;
 using LockIn.Core.Champions;
+using LockIn.Core.ChampSelect;
 using LockIn.Core.Gameflow;
 using LockIn.Core.Hosting;
 using LockIn.Core.Lcu;
@@ -96,6 +97,7 @@ public partial class App : Application
         services.AddHostedSingleton<GameflowMonitor>();
         services.AddHostedSingleton<AutoAcceptService>();
         services.AddHostedSingleton<ChampionCatalog>();
+        services.AddHostedSingleton<ChampSelectService>();
 
         // App services
         services.AddSingleton<StartupRegistration>();
