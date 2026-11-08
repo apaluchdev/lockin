@@ -17,7 +17,7 @@ public sealed class EmptyInventoryTests : IDisposable
     public async Task An_empty_inventory_means_unknown_not_owns_nothing()
     {
         await using var host = await TestHost.StartAsync(services: s => s.AddSingleton(sp =>
-            new ChampionCatalog(sp.GetRequiredService<LcuConnection>(), sp.GetRequiredService<ILogger<ChampionCatalog>>(), new HttpClientHandler(), _cache)));
+            new ChampionCatalog(sp.GetRequiredService<LcuConnection>(), sp.GetRequiredService<ILogger<ChampionCatalog>>(), new NoNetworkHandler(), _cache)));
         host.Client.SetGet("/lol-champions/v1/inventories/1/champions-minimal", Array.Empty<object>());
         var catalog = host.Host.Services.GetRequiredService<ChampionCatalog>();
 

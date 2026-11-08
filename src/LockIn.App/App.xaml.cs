@@ -9,9 +9,11 @@ using LockIn.Core.ChampSelect;
 using LockIn.Core.Gameflow;
 using LockIn.Core.Hosting;
 using LockIn.Core.Lcu;
+using LockIn.Core.Live;
 using LockIn.Core.Loadouts;
 using LockIn.Core.Matchmaking;
 using LockIn.Core.Settings;
+using LockIn.Remote;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -100,6 +102,8 @@ public partial class App : Application
         services.AddHostedSingleton<ChampionCatalog>();
         services.AddHostedSingleton<ChampSelectService>();
         services.AddHostedSingleton<LoadoutService>();
+        services.AddHostedSingleton<LiveStateService>();
+        services.AddHostedSingleton<RemoteServer>();
 
         // App services
         services.AddSingleton<StartupRegistration>();
@@ -108,6 +112,7 @@ public partial class App : Application
         services.AddSingleton<ChampionDirectory>();
         services.AddSingleton<LogViewModel>();
         services.AddSingleton<LoadoutsViewModel>();
+        services.AddSingleton<PhoneViewModel>();
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<MainViewModel>();
         services.AddSingleton<MainWindow>();

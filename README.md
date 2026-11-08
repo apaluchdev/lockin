@@ -17,6 +17,10 @@ A Windows app for League of Legends that handles the busywork around champ selec
   list) — skipped Ahri (already picked)"). Also written to daily log files.
 - **Tray app**: closing or minimizing the window keeps LockIn running in the tray. It can also start
   with Windows.
+- **Phone page**: follow champ select live on your phone over your home Wi-Fi. It shows a heartbeat,
+  the client status (in queue, match found, ban phase, pick phase…), a countdown, both teams' picks and
+  bans, and LockIn's planned ban and pick with reasons. You can **override** the ban or pick for the
+  current game and **lock in now**. Turn it on in the **Phone** tab and scan the QR code.
 
 LockIn talks only to the League client's local API (LCU) on `127.0.0.1`, which is the same API the client's
 own interface uses. It never reads the screen, sends keystrokes, or touches the game itself. It
@@ -33,6 +37,18 @@ downloads the champion list and icons from Riot's public Data Dragon CDN.
 | Settings | `%APPDATA%\LockIn\settings.json` |
 | Logs (14 days) | `%LOCALAPPDATA%\LockIn\logs` |
 | Champion list & icon cache | `%LOCALAPPDATA%\LockIn\cache` |
+
+### Phone page
+
+- Off until you enable it on the **Phone** tab. It then listens on port 47800 (changeable) on your
+  local network only. Nothing goes over the internet.
+- **Access is protected.** The QR code link carries a secret key after `#`, which browsers never send
+  in requests. If you type the address by hand, the page asks for the 6-digit pairing code shown on the
+  Phone tab. Wrong codes are rate-limited. **Sign out all phones** issues a new key and code.
+- Windows asks once whether LockIn may use the network. Allow it on **private** networks. If you
+  dismissed the prompt, allow LockIn under *Windows Security → Firewall & network protection → Allow an
+  app through firewall*.
+- Overrides apply to the current champ select only. Your saved lists don't change.
 
 **Modes:** picks, bans, runes and spells are automated on Summoner's Rift (draft, ranked, blind,
 Clash). In ARAM, Arena and other modes, LockIn only auto-accepts. Custom games are off by default (Settings).
@@ -59,11 +75,15 @@ Single self-contained `artifacts\LockIn.exe` (runs the tests first):
 queue pop, planning, bans, and a last-pick turn with a stale timer. See its
 [README](tools/LockIn.FakeClient/README.md).
 
+When developing the phone page, set `LOCKIN_REMOTE_LOOPBACK=1` so LockIn listens on `127.0.0.1` only
+(no firewall prompt), then open `http://127.0.0.1:47800` in a desktop browser.
+
 ## Layout
 
 | Path | What it is |
 |---|---|
 | `src/LockIn.App` | WPF app: .NET 10, Fluent theme (follows Windows light/dark), MVVM with CommunityToolkit.Mvvm, Generic Host for DI, tray icon via H.NotifyIcon |
+| `src/LockIn.Remote` | The phone page: Kestrel server, key/pairing auth, WebSocket live feed, and the page itself (`wwwroot/`, plain HTML/CSS/JS embedded in the assembly) |
 | `src/LockIn.Core` | UI-independent logic. `Lcu/` connection & event feed · `ChampSelect/` the decision engine (`ChampSelectPlanner`, pure and unit-tested) and the service that runs it · `Matchmaking/` auto-accept · `Loadouts/` runes & spells · `Champions/` champion catalog · `Settings/` |
 | `tests/LockIn.Core.Tests` | xUnit v3. Planner unit tests, plus end-to-end tests running the real services against a fake League client |
 | `tools/` | Fake client demo, publish script, icon generator |

@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\LockIn.Core\LockIn.Core.csproj" />
+    <ProjectReference Include="..\..\src\LockIn.Remote\LockIn.Remote.csproj" />
   </ItemGroup>
 
 </Project>

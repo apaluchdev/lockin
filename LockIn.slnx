@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/LockIn.App/LockIn.App.csproj" />
     <Project Path="src/LockIn.Core/LockIn.Core.csproj" />
+    <Project Path="src/LockIn.Remote/LockIn.Remote.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/LockIn.Core.Tests/LockIn.Core.Tests.csproj" />

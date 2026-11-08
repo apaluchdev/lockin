@@ -19,7 +19,8 @@ public sealed partial class MainViewModel : ObservableObject
         SettingsViewModel settingsPage,
         LogViewModel log,
         ChampionDirectory champions,
-        LoadoutsViewModel loadoutsPage)
+        LoadoutsViewModel loadoutsPage,
+        PhoneViewModel phonePage)
     {
         _connection = connection;
         _gameflow = gameflow;
@@ -28,6 +29,7 @@ public sealed partial class MainViewModel : ObservableObject
         PicksPage = new PriorityListsViewModel(PriorityListKind.Picks, settings, champions);
         BansPage = new PriorityListsViewModel(PriorityListKind.Bans, settings, champions);
         LoadoutsPage = loadoutsPage;
+        PhonePage = phonePage;
         Log = log;
 
         var snapshot = settings.Snapshot();
@@ -46,6 +48,8 @@ public sealed partial class MainViewModel : ObservableObject
     public PriorityListsViewModel BansPage { get; }
 
     public LoadoutsViewModel LoadoutsPage { get; }
+
+    public PhoneViewModel PhonePage { get; }
 
     public SettingsViewModel SettingsPage { get; }
 

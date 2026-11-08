@@ -313,6 +313,60 @@ public class ChampSelectPlannerTests
         Assert.Contains(plan.Notes, n => n.Message == "Your Any role ban list is empty");
     }
 
+    // ── Phone overrides and lock-now ─────────────────────────────────────
+
+    [Fact]
+    public void A_pick_override_wins_over_the_list()
+    {
+        var plan = Plan(Session(actions: [MyPick()]), Options() with { PickOverride = Syndra });
+
+        Assert.Equal(Syndra, Assert.Single(plan.Commands).ChampionId);
+        Assert.Equal(new PlannedChoice(Syndra, ChoiceSource.Override, "Pick: Syndra (your override from the phone)"), plan.Pick);
+    }
+
+    [Fact]
+    public void An_unavailable_override_falls_back_to_the_list_and_says_why()
+    {
+        var plan = Plan(Session(actions: [MyPick(), Banned(Syndra, 50)]), Options() with { PickOverride = Syndra });
+
+        Assert.Equal(Ahri, Assert.Single(plan.Commands).ChampionId);
+        Assert.Equal(ChoiceSource.List, plan.Pick!.Source);
+        Assert.Equal("Your override Syndra can't be used (banned) — pick: Ahri (#1 on your Mid pick list)", plan.Pick.Explanation);
+    }
+
+    [Fact]
+    public void A_ban_override_is_planned_before_the_ban_turn()
+    {
+        var upcomingBan = MyBan() with { IsInProgress = false };
+        var plan = Plan(Session(phase: ChampSelectTimer.Planning, actions: [upcomingBan, MyPick(inProgress: false)]), Options() with { BanOverride = Zed });
+
+        Assert.Equal(new PlannedChoice(Zed, ChoiceSource.Override, "Ban: Zed (your override from the phone)"), plan.Ban);
+        Assert.DoesNotContain(plan.Commands, c => c.ActionId == 1);
+    }
+
+    [Fact]
+    public void Lock_now_locks_immediately()
+    {
+        var memory = new ChampSelectMemory();
+        memory.HoveredByUs[10] = Ahri;
+        memory.LockNowRequested.Add("pick");
+
+        var plan = Plan(Session(leftMs: 25_000, actions: [MyPick(champion: Ahri)]), memory: memory);
+
+        var command = Assert.Single(plan.Commands);
+        Assert.Equal((ChampSelectCommandKind.Lock, Ahri), (command.Kind, command.ChampionId));
+        Assert.Equal("Locking in Ahri now (requested from your phone)", command.Description);
+    }
+
+    [Fact]
+    public void Reports_a_manual_hover_as_the_planned_pick()
+    {
+        var plan = Plan(Session(actions: [MyPick(champion: Syndra)]));
+
+        Assert.Equal(ChoiceSource.Manual, plan.Pick!.Source);
+        Assert.Equal(Syndra, plan.Pick.ChampionId);
+    }
+
     [Theory]
     [InlineData("top", Role.Top)]
     [InlineData("jungle", Role.Jungle)]

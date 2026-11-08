@@ -71,6 +71,9 @@
             <TabItem Header="Runes &amp; spells">
                 <views:LoadoutsView DataContext="{Binding LoadoutsPage}" />
             </TabItem>
+            <TabItem Header="Phone">
+                <views:PhoneView DataContext="{Binding PhonePage}" />
+            </TabItem>
             <TabItem Header="Settings">
                 <views:SettingsView DataContext="{Binding SettingsPage}" />
             </TabItem>

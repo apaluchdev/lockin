@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Threading.Channels;
 using LockIn.Core.Champions;
 using LockIn.Core.Gameflow;
@@ -10,7 +11,8 @@ namespace LockIn.Core.ChampSelect;
 
 /// <summary>
 /// Runs champ select: follows the session, asks <see cref="ChampSelectPlanner"/> what to do several times a
-/// second, sends the resulting hovers/locks to the client, and logs every decision once.
+/// second, sends the resulting hovers/locks to the client, and logs every decision once. Also publishes a
+/// live <see cref="View"/> and accepts per-game overrides and lock-now requests (from the phone).
 /// </summary>
 public sealed class ChampSelectService(
     LcuConnection connection,
@@ -20,26 +22,72 @@ public sealed class ChampSelectService(
     TimeProvider time,
     ILogger<ChampSelectService> logger) : BackgroundService
 {
+    public const string Pick = ChampSelectAction.Pick;
+    public const string Ban = ChampSelectAction.Ban;
+
     private const string SessionPath = "lol-champ-select/v1/session";
+    private const int MaxRecentDecisions = 12;
     private static readonly TimeSpan Tick = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan RetryAfterFailure = TimeSpan.FromSeconds(1);
 
     private readonly Channel<Message> _inbox = Channel.CreateUnbounded<Message>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Lock _recentGate = new();
+    private readonly List<DecisionEntry> _recent = [];
+    private volatile ChampSelectView? _view;
 
     // Everything below is only touched by the loop.
     private ChampSelectSession? _session;
     private ChampSelectMemory _memory = new();
+    private ChampSelectPlan? _lastPlan;
     private readonly Dictionary<string, string> _lastNotes = [];
     private readonly Dictionary<int, long> _retryAt = [];
     private readonly HashSet<int> _announced = [];
     private IReadOnlySet<int>? _pickable;
     private HashSet<int>? _bannable;
     private bool _automate;
+    private string? _notAutomatedReason;
+    private string? _queue;
+    private int? _pickOverride;
+    private int? _banOverride;
     private bool _pickableRefreshedForTurn;
     private long _gameId = -1;
 
     /// <summary>Raised (on a background thread) when the local player's champion is locked in. Used for runes/spells.</summary>
     public event EventHandler<ChampionLockedEventArgs>? ChampionLocked;
+
+    /// <summary>Raised (on a background thread) whenever <see cref="View"/> or <see cref="RecentDecisions"/> may have changed.</summary>
+    public event EventHandler? ViewChanged;
+
+    /// <summary>The current champ select, or null when not in one.</summary>
+    public ChampSelectView? View => _view;
+
+    /// <summary>LockIn's most recent decisions, oldest first.</summary>
+    public IReadOnlyList<DecisionEntry> RecentDecisions
+    {
+        get
+        {
+            lock (_recentGate)
+            {
+                return [.. _recent];
+            }
+        }
+    }
+
+    /// <summary>Overrides the pick or ban for this champ select only. Null clears it. Returns an error message, or null on success.</summary>
+    public Task<string?> SetOverrideAsync(string kind, int? championId)
+    {
+        var done = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _inbox.Writer.TryWrite(new SetOverride(kind, championId, done));
+        return done.Task;
+    }
+
+    /// <summary>Locks in the current pick or ban right away. Returns an error message, or null on success.</summary>
+    public Task<string?> LockNowAsync(string kind)
+    {
+        var done = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _inbox.Writer.TryWrite(new LockNow(kind, done));
+        return done.Task;
+    }
 
     private abstract record Message;
 
@@ -47,10 +95,15 @@ public sealed class ChampSelectService(
 
     private sealed record Ended : Message;
 
+    private sealed record SetOverride(string Kind, int? ChampionId, TaskCompletionSource<string?> Done) : Message;
+
+    private sealed record LockNow(string Kind, TaskCompletionSource<string?> Done) : Message;
+
     public override Task StartAsync(CancellationToken cancellationToken)
     {
         connection.EventReceived += OnEvent;
         gameflow.PhaseChanged += OnPhaseChanged;
+        settings.Changed += OnSettingsChanged;
         return base.StartAsync(cancellationToken);
     }
 
@@ -58,8 +111,11 @@ public sealed class ChampSelectService(
     {
         connection.EventReceived -= OnEvent;
         gameflow.PhaseChanged -= OnPhaseChanged;
+        settings.Changed -= OnSettingsChanged;
         return base.StopAsync(cancellationToken);
     }
+
+    private void OnSettingsChanged(object? sender, EventArgs e) => ViewChanged?.Invoke(this, EventArgs.Empty);
 
     private void OnEvent(object? sender, LcuEvent e)
     {
@@ -127,6 +183,8 @@ public sealed class ChampSelectService(
                 {
                     await EvaluateAsync(stoppingToken).ConfigureAwait(false);
                 }
+
+                PublishView();
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -178,10 +236,104 @@ public sealed class ChampSelectService(
                 break;
 
             case Ended when _session is not null:
-                logger.LogInformation("Champ select ended");
+                Decide("Champ select ended");
                 Reset();
                 break;
+
+            case SetOverride request:
+                request.Done.TrySetResult(ApplyOverride(request.Kind, request.ChampionId));
+                break;
+
+            case LockNow request:
+                request.Done.TrySetResult(await ApplyLockNowAsync(request.Kind, stoppingToken).ConfigureAwait(false));
+                break;
         }
+    }
+
+    private string? ApplyOverride(string kind, int? championId)
+    {
+        if (_session is null)
+        {
+            return "You're not in champ select";
+        }
+
+        if (kind is not (Pick or Ban))
+        {
+            return $"Unknown action \"{kind}\"";
+        }
+
+        if (championId is { } id && catalog.Find(id) is null)
+        {
+            return "Unknown champion";
+        }
+
+        if (!_automate || !settings.Snapshot().AutomationEnabled)
+        {
+            return _notAutomatedReason ?? "Champ select automation is off";
+        }
+
+        if (kind == Pick)
+        {
+            _pickOverride = championId;
+        }
+        else
+        {
+            _banOverride = championId;
+        }
+
+        // Adopt whatever is hovered right now as ours, so an earlier manual hover doesn't block the override.
+        foreach (var action in MyActions(_session).Where(a => a.Type == kind && a.IsInProgress && !a.Completed))
+        {
+            _memory.HoveredByUs[action.Id] = action.ChampionId;
+        }
+
+        // During planning, show the new pick to the team as the intent.
+        if (kind == Pick && _session.Timer.Phase == ChampSelectTimer.Planning
+            && MyActions(_session).FirstOrDefault(a => a.Type == Pick && !a.Completed) is { } pickAction)
+        {
+            _memory.HoveredByUs[pickAction.Id] = pickAction.ChampionId;
+            _memory.IntentDeclared = false;
+        }
+
+        Decide(championId is { } champion
+            ? $"Phone: {kind} {catalog.NameOf(champion)} this game"
+            : $"Phone: cleared the {kind} override — back to your lists");
+        return null;
+    }
+
+    private async Task<string?> ApplyLockNowAsync(string kind, CancellationToken stoppingToken)
+    {
+        if (_session is null)
+        {
+            return "You're not in champ select";
+        }
+
+        var action = MyActions(_session).FirstOrDefault(a => a.Type == kind && a.IsInProgress && !a.Completed);
+        if (action is null)
+        {
+            return $"It's not your {kind} turn";
+        }
+
+        var s = settings.Snapshot();
+        var kindEnabled = kind == Pick ? s.Picks.Enabled : s.Bans.Enabled;
+        if (_automate && s.AutomationEnabled && kindEnabled)
+        {
+            // The planner locks its target (override, manual hover or list pick) on the next evaluation.
+            _memory.LockNowRequested.Add(kind);
+            Decide($"Phone: lock in the {kind} now");
+            return null;
+        }
+
+        // Not automating: lock whatever is hovered.
+        if (action.ChampionId == 0)
+        {
+            return "Nothing is hovered yet";
+        }
+
+        await ExecuteAsync(new ChampSelectCommand(ChampSelectCommandKind.Lock, action.Id, action.ChampionId,
+            $"{(kind == Ban ? "Banning" : "Locking in")} {catalog.NameOf(action.ChampionId)} now (requested from your phone)"),
+            time.GetUtcNow().ToUnixTimeMilliseconds(), stoppingToken).ConfigureAwait(false);
+        return _memory.LockSent.Contains(action.Id) ? null : "The client refused the lock-in";
     }
 
     private async Task BeginAsync(ChampSelectSession session, CancellationToken stoppingToken)
@@ -191,29 +343,29 @@ public sealed class ChampSelectService(
         var s = settings.Snapshot();
 
         var (queue, isCustom, gameMode) = await ReadQueueAsync(stoppingToken).ConfigureAwait(false);
-        var player = session.LocalPlayer;
-        var role = ChampSelectPlanner.RoleFromPosition(player?.AssignedPosition);
-        var myPicks = session.AllActions.Where(a => a.Type == ChampSelectAction.Pick && a.IsAllyAction).ToList();
+        _queue = queue;
+        var role = ChampSelectPlanner.RoleFromPosition(session.LocalPlayer?.AssignedPosition);
+        var myPicks = session.AllActions.Where(a => a.Type == Pick && a.IsAllyAction).ToList();
         var pickNumber = myPicks.FindIndex(a => a.ActorCellId == session.LocalPlayerCellId) + 1;
 
-        logger.LogInformation("Champ select started: {Queue}. Role: {Role}{PickOrder}",
-            queue, ChampSelectPlanner.RoleName(role),
-            pickNumber > 0 ? $", you're pick {pickNumber} of {myPicks.Count} on your team" : "");
+        Decide($"Champ select started: {queue}. Role: {ChampSelectPlanner.RoleName(role)}"
+            + (pickNumber > 0 ? $", you're pick {pickNumber} of {myPicks.Count} on your team" : ""));
 
         _automate = gameMode is null or "CLASSIC" && (!isCustom || s.General.AutomateCustomGames);
         if (!_automate)
         {
-            logger.LogInformation("{Message}", isCustom
+            _notAutomatedReason = isCustom
                 ? "Custom game — picks and bans are up to you (enable custom games in Settings to change this)"
-                : $"LockIn only automates Summoner's Rift picks and bans; in {gameMode} they're up to you");
+                : $"LockIn only automates Summoner's Rift picks and bans; in {gameMode} they're up to you";
+            Decide(_notAutomatedReason);
         }
         else if (!s.AutomationEnabled)
         {
-            logger.LogInformation("Champ select automation is switched off — LockIn won't ban or pick");
+            Decide("Champ select automation is switched off — LockIn won't ban or pick");
         }
 
         // Anything already done before we joined shouldn't be announced as new.
-        foreach (var action in session.AllActions.Where(a => a.ActorCellId == session.LocalPlayerCellId && a.Completed))
+        foreach (var action in MyActions(session).Where(a => a.Completed))
         {
             _announced.Add(action.Id);
         }
@@ -257,8 +409,8 @@ public sealed class ChampSelectService(
             _pickable = pickable is { Length: > 0 } ? pickable.ToHashSet() : null;
             _bannable = bannable is { Length: > 0 } ? bannable.ToHashSet() : null;
             logger.LogDebug("Pickable champions: {Pickable}, bannable: {Bannable}",
-                _pickable?.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unknown",
-                _bannable?.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unknown");
+                _pickable?.Count.ToString(CultureInfo.InvariantCulture) ?? "unknown",
+                _bannable?.Count.ToString(CultureInfo.InvariantCulture) ?? "unknown");
         }
         catch (LcuRequestException ex)
         {
@@ -274,14 +426,15 @@ public sealed class ChampSelectService(
         var s = settings.Snapshot();
         if (!_automate || !s.AutomationEnabled)
         {
+            _lastPlan = null;
             return;
         }
 
         var now = time.GetUtcNow().ToUnixTimeMilliseconds();
-        foreach (var action in session.AllActions.Where(a => a.ActorCellId == session.LocalPlayerCellId && a.IsInProgress))
+        foreach (var action in MyActions(session).Where(a => a.IsInProgress))
         {
             _memory.FirstSeenInProgress.TryAdd(action.Id, now);
-            if (action.Type == ChampSelectAction.Pick && !_pickableRefreshedForTurn)
+            if (action.Type == Pick && !_pickableRefreshedForTurn)
             {
                 // Ownership/free rotation can change; refresh once when our pick turn begins.
                 _pickableRefreshedForTurn = true;
@@ -289,14 +442,16 @@ public sealed class ChampSelectService(
             }
         }
 
-        var plan = ChampSelectPlanner.Plan(session, ChampSelectOptions.From(s), _memory, now, _pickable, _bannable, catalog.NameOf);
+        var options = ChampSelectOptions.From(s) with { PickOverride = _pickOverride, BanOverride = _banOverride };
+        var plan = ChampSelectPlanner.Plan(session, options, _memory, now, _pickable, _bannable, catalog.NameOf);
+        _lastPlan = plan;
 
         foreach (var note in plan.Notes)
         {
             if (!_lastNotes.TryGetValue(note.Topic, out var last) || last != note.Message)
             {
                 _lastNotes[note.Topic] = note.Message;
-                logger.LogInformation("{Decision}", note.Message);
+                Decide(note.Message);
             }
         }
 
@@ -318,7 +473,7 @@ public sealed class ChampSelectService(
             return;
         }
 
-        logger.LogInformation("{Action}", command.Description);
+        Decide(command.Description);
         var path = $"lol-champ-select/v1/session/actions/{command.ActionId}";
         try
         {
@@ -339,6 +494,11 @@ public sealed class ChampSelectService(
                     await client.PatchAsync(path, new { championId = command.ChampionId, completed = true }, stoppingToken).ConfigureAwait(false);
                     _memory.HoveredByUs[command.ActionId] = command.ChampionId;
                     _memory.LockSent.Add(command.ActionId);
+                    if (_session?.AllActions.FirstOrDefault(a => a.Id == command.ActionId) is { } locked)
+                    {
+                        _memory.LockNowRequested.Remove(locked.Type);
+                    }
+
                     break;
             }
 
@@ -353,7 +513,7 @@ public sealed class ChampSelectService(
 
     private void AnnounceCompletedActions(ChampSelectSession session)
     {
-        foreach (var action in session.AllActions.Where(a => a.ActorCellId == session.LocalPlayerCellId && a.Completed))
+        foreach (var action in MyActions(session).Where(a => a.Completed))
         {
             if (!_announced.Add(action.Id))
             {
@@ -364,30 +524,64 @@ public sealed class ChampSelectService(
             var name = action.ChampionId > 0 ? catalog.NameOf(action.ChampionId) : null;
             switch (action.Type)
             {
-                case ChampSelectAction.Ban when name is null:
-                    logger.LogInformation("Your ban was skipped");
+                case Ban when name is null:
+                    Decide("Your ban was skipped");
                     break;
-                case ChampSelectAction.Ban:
-                    logger.LogInformation("{Message}", byUs ? $"✓ Banned {name}" : $"You banned {name}");
+                case Ban:
+                    Decide(byUs ? $"✓ Banned {name}" : $"You banned {name}");
                     break;
-                case ChampSelectAction.Pick when name is not null:
-                    logger.LogInformation("{Message}", byUs ? $"✓ Locked in {name}" : $"You locked in {name}");
+                case Pick when name is not null:
+                    Decide(byUs ? $"✓ Locked in {name}" : $"You locked in {name}");
                     ChampionLocked?.Invoke(this, new ChampionLockedEventArgs(action.ChampionId, _automate));
                     break;
             }
         }
     }
 
+    /// <summary>Logs a decision and keeps it for the phone's "recent decisions" list.</summary>
+    private void Decide(string message)
+    {
+        logger.LogInformation("{Decision}", message);
+        lock (_recentGate)
+        {
+            _recent.Add(new DecisionEntry(time.GetUtcNow().ToUnixTimeMilliseconds(), message));
+            if (_recent.Count > MaxRecentDecisions)
+            {
+                _recent.RemoveAt(0);
+            }
+        }
+    }
+
+    private void PublishView()
+    {
+        var s = settings.Snapshot();
+        _view = _session is null
+            ? null
+            : ChampSelectViewBuilder.Build(
+                _session, _lastPlan, time.GetUtcNow().ToUnixTimeMilliseconds(), _queue, _pickOverride, _banOverride,
+                automated: _automate && s.AutomationEnabled,
+                automationNote: !_automate ? _notAutomatedReason : !s.AutomationEnabled ? "Champ select automation is off" : null);
+        ViewChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static IEnumerable<ChampSelectAction> MyActions(ChampSelectSession session) =>
+        session.AllActions.Where(a => a.ActorCellId == session.LocalPlayerCellId);
+
     private void Reset()
     {
         _session = null;
         _memory = new ChampSelectMemory();
+        _lastPlan = null;
         _lastNotes.Clear();
         _retryAt.Clear();
         _announced.Clear();
         _pickable = null;
         _bannable = null;
         _automate = false;
+        _notAutomatedReason = null;
+        _queue = null;
+        _pickOverride = null;
+        _banOverride = null;
         _pickableRefreshedForTurn = false;
         _gameId = -1;
     }

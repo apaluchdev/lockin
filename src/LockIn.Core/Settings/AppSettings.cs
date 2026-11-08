@@ -43,6 +43,21 @@ public sealed class AppSettings
     public LoadoutSettings Loadouts { get; set; } = new();
 
     public GeneralSettings General { get; set; } = new();
+
+    public RemoteSettings Remote { get; set; } = new();
+}
+
+/// <summary>The phone page served on the local network.</summary>
+public sealed class RemoteSettings
+{
+    public const int DefaultPort = 47800;
+
+    public bool Enabled { get; set; }
+
+    public int Port { get; set; } = DefaultPort;
+
+    /// <summary>Secret key carried in the QR-code link. Generated on first use; regenerating it signs out every phone.</summary>
+    public string? Key { get; set; }
 }
 
 public sealed class BanSettings

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1118">
+  <meta name="color-scheme" content="dark">
+  <title>LockIn</title>
+  <link rel="icon" href="/icon.png">
+  <link rel="apple-touch-icon" href="/icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><img src="/icon.png" alt="" width="28" height="28"><span>LockIn</span></div>
+    <div id="pulse" class="pulse is-connecting" role="status" aria-live="polite">
+      <span class="dot" aria-hidden="true"></span><span id="pulseText">Connecting…</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Shown when this phone has no key yet (address typed by hand). -->
+    <section id="pairing" class="card pairing" hidden>
+      <h1>Connect to your PC</h1>
+      <p>Enter the 6-digit pairing code shown on the <b>Phone</b> tab in LockIn on your PC. Or scan the QR code there instead.</p>
+      <form id="pairForm" autocomplete="off">
+        <input id="pairCode" inputmode="numeric" pattern="[0-9 ]*" maxlength="7" placeholder="123 456" aria-label="Pairing code" required>
+        <button type="submit" class="primary">Connect</button>
+      </form>
+      <p id="pairError" class="error" role="alert"></p>
+    </section>
+
+    <section id="live" hidden>
+      <p id="client" class="client-line"></p>
+
+      <section class="card status" aria-live="polite">
+        <div id="phase" class="phase">—</div>
+        <div id="phaseSub" class="sub"></div>
+        <div id="timer" class="timer" hidden>
+          <div class="bar"><span id="timerBar"></span></div>
+          <span id="timerText" class="timer-text"></span>
+        </div>
+      </section>
+
+      <section id="readyCard" class="card ready" hidden>
+        <div class="ready-title">Match found!</div>
+        <div id="readyText" class="sub"></div>
+      </section>
+
+      <section id="mineCard" class="card mine" hidden>
+        <div id="banPlan" class="plan" hidden>
+          <div class="plan-label">Your ban</div>
+          <div class="plan-row">
+            <div class="champ-chip" id="banChamp"></div>
+            <div class="plan-actions">
+              <button type="button" data-change="ban">Change</button>
+              <button type="button" data-lock="ban" class="primary" hidden>Ban now</button>
+            </div>
+          </div>
+          <div class="plan-why" id="banWhy"></div>
+        </div>
+        <div id="pickPlan" class="plan" hidden>
+          <div class="plan-label">Your pick</div>
+          <div class="plan-row">
+            <div class="champ-chip" id="pickChamp"></div>
+            <div class="plan-actions">
+              <button type="button" data-change="pick">Change</button>
+              <button type="button" data-lock="pick" class="primary" hidden>Lock in now</button>
+            </div>
+          </div>
+          <div class="plan-why" id="pickWhy"></div>
+        </div>
+        <p id="autoNote" class="note" hidden></p>
+      </section>
+
+      <section id="teamsCard" class="card teams" hidden>
+        <div class="team-grid">
+          <div class="team ally">
+            <h2>Your team</h2>
+            <div class="bans" id="myBans" aria-label="Your team's bans"></div>
+            <ol id="myTeam"></ol>
+          </div>
+          <div class="team enemy">
+            <h2>Enemy team</h2>
+            <div class="bans" id="theirBans" aria-label="Enemy team's bans"></div>
+            <ol id="theirTeam"></ol>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>LockIn activity</h2>
+        <ol id="decisions" class="decisions"></ol>
+      </section>
+    </section>
+  </main>
+
+  <!-- Champion picker for overrides. -->
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-backdrop" data-close></div>
+    <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+      <div class="sheet-head">
+        <h2 id="sheetTitle">Choose</h2>
+        <button type="button" class="ghost" data-close aria-label="Close">✕</button>
+      </div>
+      <p class="sheet-hint">For this champ select only. Your saved lists don't change.</p>
+      <input id="search" type="search" placeholder="Search champions" aria-label="Search champions" autocomplete="off">
+      <button type="button" id="clearOverride" class="wide" hidden>Use my lists again</button>
+      <div id="quickWrap">
+        <h3 id="quickTitle"></h3>
+        <div id="quick" class="grid"></div>
+      </div>
+      <h3>All champions</h3>
+      <div id="all" class="grid"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="alert" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>

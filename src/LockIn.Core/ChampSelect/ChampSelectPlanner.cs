@@ -27,6 +27,12 @@ public sealed record ChampSelectOptions
 
     public IReadOnlyDictionary<Role, List<int>> BanLists { get; init; } = new Dictionary<Role, List<int>>();
 
+    /// <summary>Pick set from the phone for this champ select only; wins over the lists when available.</summary>
+    public int? PickOverride { get; init; }
+
+    /// <summary>Ban set from the phone for this champ select only; wins over the lists when available.</summary>
+    public int? BanOverride { get; init; }
+
     public static ChampSelectOptions From(AppSettings s) => new()
     {
         BansEnabled = s.Bans.Enabled,
@@ -55,6 +61,9 @@ public sealed class ChampSelectMemory
     public Dictionary<int, long> FirstSeenInProgress { get; } = [];
 
     public bool IntentDeclared { get; set; }
+
+    /// <summary>"pick" and/or "ban": lock in immediately (requested from the phone).</summary>
+    public HashSet<string> LockNowRequested { get; } = [];
 }
 
 public enum ChampSelectCommandKind
@@ -74,7 +83,29 @@ public sealed record ChampSelectCommand(ChampSelectCommandKind Kind, int ActionI
 /// <summary>A human-readable decision. The service logs it when the message for its topic changes.</summary>
 public sealed record DecisionNote(string Topic, string Message);
 
-public sealed record ChampSelectPlan(IReadOnlyList<ChampSelectCommand> Commands, IReadOnlyList<DecisionNote> Notes);
+public sealed record ChampSelectPlan(IReadOnlyList<ChampSelectCommand> Commands, IReadOnlyList<DecisionNote> Notes)
+{
+    /// <summary>What LockIn intends to pick, and why (null when there's no pick to make).</summary>
+    public PlannedChoice? Pick { get; init; }
+
+    /// <summary>What LockIn intends to ban, and why (null when there's no ban to make).</summary>
+    public PlannedChoice? Ban { get; init; }
+}
+
+public enum ChoiceSource
+{
+    /// <summary>From the priority lists.</summary>
+    List,
+
+    /// <summary>Overridden from the phone for this champ select.</summary>
+    Override,
+
+    /// <summary>Hovered by the player in the client.</summary>
+    Manual,
+}
+
+/// <summary>A planned ban or pick. <see cref="ChampionId"/> is null when nothing suitable was found.</summary>
+public sealed record PlannedChoice(int? ChampionId, ChoiceSource Source, string Explanation);
 
 /// <summary>
 /// Decides what to do in champ select. Pure: given the session, settings, memory and the current time it
@@ -100,7 +131,7 @@ public static class ChampSelectPlanner
             : $"Your role: {RoleName(ctx.Role)}"));
 
         var myPick = ctx.Actions.FirstOrDefault(a => a.ActorCellId == session.LocalPlayerCellId && a.Type == ChampSelectAction.Pick && !a.Completed);
-        var myBan = ctx.Actions.FirstOrDefault(a => a.ActorCellId == session.LocalPlayerCellId && a.Type == ChampSelectAction.Ban && a.IsInProgress && !a.Completed);
+        var myUpcomingBan = ctx.Actions.FirstOrDefault(a => a.ActorCellId == session.LocalPlayerCellId && a.Type == ChampSelectAction.Ban && !a.Completed);
 
         // What we'd pick right now. Also used to avoid banning our own pick.
         var pick = options.PicksEnabled && myPick is not null ? ctx.ChoosePick() : null;
@@ -109,16 +140,21 @@ public static class ChampSelectPlanner
             notes.Add(new("pick-choice", pick.Explanation));
         }
 
-        if (myBan is not null)
+        // What we'd ban (computed ahead of the ban turn too, so the phone can show it).
+        var ban = options.BansEnabled && myUpcomingBan is not null ? ctx.ChooseBan(pick?.ChampionId) : null;
+        var plannedPick = pick?.ToPlanned();
+        var plannedBan = ban?.ToPlanned();
+
+        if (myUpcomingBan is { IsInProgress: true } myBan)
         {
-            PlanTurn(ctx, myBan, isBan: true, pick?.ChampionId, commands, notes);
+            plannedBan = PlanTurn(ctx, myBan, isBan: true, ban, commands, notes);
         }
 
         if (myPick is not null && options.PicksEnabled)
         {
             if (myPick.IsInProgress)
             {
-                PlanTurn(ctx, myPick, isBan: false, pick?.ChampionId, commands, notes);
+                plannedPick = PlanTurn(ctx, myPick, isBan: false, pick, commands, notes);
             }
             else if (session.Timer.Phase == ChampSelectTimer.Planning && options.PreHoverInPlanning && !memory.IntentDeclared)
             {
@@ -130,7 +166,7 @@ public static class ChampSelectPlanner
             notes.Add(new("pick-turn", "Your pick turn — pick automation is off"));
         }
 
-        return new ChampSelectPlan(commands, notes);
+        return new ChampSelectPlan(commands, notes) { Pick = plannedPick, Ban = plannedBan };
     }
 
     private static void PlanIntent(Context ctx, ChampSelectAction myPick, int? choice, List<ChampSelectCommand> commands, List<DecisionNote> notes)
@@ -148,19 +184,20 @@ public static class ChampSelectPlanner
         }
     }
 
-    private static void PlanTurn(Context ctx, ChampSelectAction action, bool isBan, int? pickChoice, List<ChampSelectCommand> commands, List<DecisionNote> notes)
+    /// <summary>Plans our ban or pick turn. Returns what will be banned/picked, for display.</summary>
+    private static PlannedChoice? PlanTurn(Context ctx, ChampSelectAction action, bool isBan, Choice? choice, List<ChampSelectCommand> commands, List<DecisionNote> notes)
     {
         var verb = isBan ? "ban" : "pick";
         var topic = $"{verb}-turn";
         if (isBan && !ctx.Options.BansEnabled)
         {
             notes.Add(new(topic, "Your ban turn — ban automation is off"));
-            return;
+            return null;
         }
 
         if (ctx.Memory.LockSent.Contains(action.Id))
         {
-            return; // Waiting for the client to confirm.
+            return choice?.ToPlanned(); // Waiting for the client to confirm.
         }
 
         var hoverDelay = isBan ? ctx.Options.BanHoverDelaySeconds : ctx.Options.PickHoverDelaySeconds;
@@ -172,20 +209,21 @@ public static class ChampSelectPlanner
         var manual = current != 0 && current != requested;
 
         int? target;
+        PlannedChoice? planned;
         if (manual)
         {
             target = current;
+            planned = new PlannedChoice(current, ChoiceSource.Manual, $"You hovered {ctx.Name(current)} yourself");
             notes.Add(new(topic, $"You hovered {ctx.Name(current)} yourself — LockIn will {verb} it with {Seconds(lockBefore)} left"));
-        }
-        else if (isBan)
-        {
-            var ban = ctx.ChooseBan(pickChoice);
-            notes.Add(new("ban-choice", ban.Explanation));
-            target = ban.ChampionId;
         }
         else
         {
-            target = pickChoice;
+            target = choice?.ChampionId;
+            planned = choice?.ToPlanned();
+            if (isBan && choice is not null)
+            {
+                notes.Add(new("ban-choice", choice.Explanation));
+            }
         }
 
         if (target is not { } champion)
@@ -193,16 +231,17 @@ public static class ChampSelectPlanner
             notes.Add(new(topic, isBan
                 ? "Nothing on your ban lists can be banned — leaving the ban to you"
                 : "Nothing on your pick lists is available — leaving the pick to you"));
-            return;
+            return planned;
         }
 
         // An infinite timer (custom games) has no deadline: lock as soon as the hover delay has passed.
-        var lockDue = remaining is { } left ? left <= lockBefore : elapsed >= hoverDelay;
+        var lockNow = ctx.Memory.LockNowRequested.Contains(verb);
+        var lockDue = lockNow || (remaining is { } left ? left <= lockBefore : elapsed >= hoverDelay);
         var hoverDue = elapsed >= hoverDelay;
 
         if (lockDue)
         {
-            var timeLeft = remaining is { } r ? $" ({Seconds(r)} left)" : "";
+            var timeLeft = lockNow ? " now (requested from your phone)" : remaining is { } r ? $" ({Seconds(r)} left)" : "";
             commands.Add(new(ChampSelectCommandKind.Lock, action.Id, champion,
                 isBan ? $"Banning {ctx.Name(champion)}{timeLeft}" : $"Locking in {ctx.Name(champion)}{timeLeft}"));
         }
@@ -223,6 +262,8 @@ public static class ChampSelectPlanner
         {
             notes.Add(new(topic, $"{(isBan ? "Ban" : "Pick")}: {ctx.Name(champion)} hovered — locking in with {Seconds(lockBefore)} left"));
         }
+
+        return planned;
     }
 
     internal static Role RoleFromPosition(string? position) => position?.ToLowerInvariant() switch
@@ -245,7 +286,10 @@ public static class ChampSelectPlanner
 
     private static string Seconds(double seconds) => seconds.ToString("0.#", CultureInfo.InvariantCulture) + " s";
 
-    private sealed record Choice(int? ChampionId, string Explanation);
+    private sealed record Choice(int? ChampionId, string Explanation, ChoiceSource Source = ChoiceSource.List)
+    {
+        public PlannedChoice ToPlanned() => new(ChampionId, Source, Explanation);
+    }
 
     private sealed class Context
     {
@@ -338,12 +382,14 @@ public static class ChampSelectPlanner
                 lists.Add(Role.Any);
             }
 
-            return Choose(lists, Options.PickLists, "pick", id =>
+            string? WhyNot(int id) =>
                 Banned.Contains(id) ? "banned"
                 : Picked.Contains(id) ? "already picked"
                 : AllyWants.Contains(id) ? "a teammate wants it"
                 : Playable is not null && !Playable.Contains(id) ? "you don't own it"
-                : null);
+                : null;
+
+            return WithOverride(Options.PickOverride, "pick", WhyNot, () => Choose(lists, Options.PickLists, "pick", WhyNot));
         }
 
         public Choice ChooseBan(int? ownPick)
@@ -352,14 +398,33 @@ public static class ChampSelectPlanner
                 ? Role
                 : Role.Any;
 
-            return Choose([list], Options.BanLists, "ban", id =>
+            string? WhyNot(int id) =>
                 id == ownPick ? "it's your own pick"
                 : Banned.Contains(id) ? "already banned"
                 : AllyBanHovers.Contains(id) ? "a teammate is banning it"
                 : AllyWants.Contains(id) ? "a teammate wants it"
                 : Picked.Contains(id) ? "already picked"
                 : Bannable is not null && !Bannable.Contains(id) ? "can't be banned"
-                : null);
+                : null;
+
+            return WithOverride(Options.BanOverride, "ban", WhyNot, () => Choose([list], Options.BanLists, "ban", WhyNot));
+        }
+
+        /// <summary>A phone override wins when it's available; otherwise say why and fall back to the lists.</summary>
+        private Choice WithOverride(int? overrideId, string kind, Func<int, string?> whyNot, Func<Choice> fromLists)
+        {
+            if (overrideId is not { } id)
+            {
+                return fromLists();
+            }
+
+            if (whyNot(id) is not { } reason)
+            {
+                return new Choice(id, $"{Capitalize(kind)}: {Name(id)} (your override from the phone)", ChoiceSource.Override);
+            }
+
+            var fallback = fromLists();
+            return fallback with { Explanation = $"Your override {Name(id)} can't be used ({reason}) — {char.ToLowerInvariant(fallback.Explanation[0])}{fallback.Explanation[1..]}" };
         }
 
         private Choice Choose(List<Role> roles, IReadOnlyDictionary<Role, List<int>> lists, string kind, Func<int, string?> whyNot)

@@ -24,11 +24,13 @@
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" />
     <PackageReference Include="H.NotifyIcon.Wpf" />
+    <PackageReference Include="QRCoder" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\LockIn.Core\LockIn.Core.csproj" />
+    <ProjectReference Include="..\LockIn.Remote\LockIn.Remote.csproj" />
   </ItemGroup>
 
 </Project>

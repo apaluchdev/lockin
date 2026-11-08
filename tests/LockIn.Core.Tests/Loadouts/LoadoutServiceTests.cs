@@ -22,7 +22,7 @@ public sealed class LoadoutServiceTests : IDisposable
         var host = await TestHost.StartAsync(configure, services =>
         {
             services.AddSingleton(sp => new ChampionCatalog(sp.GetRequiredService<LcuConnection>(),
-                sp.GetRequiredService<ILogger<ChampionCatalog>>(), new HttpClientHandler(), _cache));
+                sp.GetRequiredService<ILogger<ChampionCatalog>>(), new NoNetworkHandler(), _cache));
             services.AddHostedSingleton<ChampSelectService>();
             services.AddHostedSingleton<LoadoutService>();
         });

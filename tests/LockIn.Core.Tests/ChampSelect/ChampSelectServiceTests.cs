@@ -160,6 +160,33 @@ public sealed class ChampSelectServiceTests : IDisposable
         Assert.Empty(host.Client.RequestsTo("PATCH", "/lol-champ-select"));
     }
 
+    [Fact]
+    public async Task A_pick_override_during_planning_redeclares_the_intent()
+    {
+        await using var host = await StartAsync();
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, Session(25_000, [PickAction(inProgress: false)], phase: "PLANNING"));
+        await host.WaitUntilAsync(() => host.Client.RequestsTo("PATCH", "/lol-champ-select/v1/session/actions/10").Any(), "declare Ahri as intent");
+
+        var service = host.Host.Services.GetRequiredService<ChampSelectService>();
+        Assert.Null(await service.SetOverrideAsync(ChampSelectService.Pick, Orianna));
+
+        await host.WaitUntilAsync(
+            () => host.Client.RequestsTo("PATCH", "/lol-champ-select/v1/session/actions/10").Any(r => r.Json.GetProperty("championId").GetInt32() == Orianna),
+            "re-declare Orianna as intent");
+        Assert.Equal(ChoiceSource.Override, service.View!.PlannedPick!.Source);
+    }
+
+    [Fact]
+    public async Task Lock_now_is_refused_outside_our_turn()
+    {
+        await using var host = await StartAsync();
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, Session(25_000, [PickAction(inProgress: false)], phase: "PLANNING"));
+        var service = host.Host.Services.GetRequiredService<ChampSelectService>();
+        await host.WaitUntilAsync(() => service.View is not null, "see champ select");
+
+        Assert.Equal("It's not your pick turn", await service.LockNowAsync(ChampSelectService.Pick));
+    }
+
     private sealed class NoNetwork : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
