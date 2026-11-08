@@ -1,3 +1,5 @@
 [*.cs]
 # Test names use underscores for readability.
 dotnet_diagnostic.CA1707.severity = none
+# Tests are short; threading TestContext cancellation through every call adds noise.
+dotnet_diagnostic.xUnit1051.severity = none
