@@ -1,10 +1,31 @@
 ﻿<Application x:Class="LockIn.App.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="clr-namespace:LockIn.App.Converters"
              ThemeMode="System"
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
         <ResourceDictionary>
+
+            <conv:IconConverter x:Key="IconConverter" />
+            <conv:NullToVisibleConverter x:Key="NullToVisible" />
+            <BooleanToVisibilityConverter x:Key="BoolToVisible" />
+
+            <!-- Square champion portrait with an initials placeholder while the icon loads. DataContext: ChampionItemViewModel. -->
+            <DataTemplate x:Key="ChampionIcon">
+                <Grid Width="32" Height="32">
+                    <Border CornerRadius="4" Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                        <TextBlock Text="{Binding Initials}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Visibility="{Binding IconPath, Converter={StaticResource NullToVisible}}" />
+                    </Border>
+                    <Border CornerRadius="4">
+                        <Border.Background>
+                            <ImageBrush ImageSource="{Binding IconPath, Converter={StaticResource IconConverter}}" Stretch="UniformToFill" />
+                        </Border.Background>
+                    </Border>
+                </Grid>
+            </DataTemplate>
 
             <!-- A rounded panel grouping related settings or lists. -->
             <Style x:Key="Card" TargetType="Border">

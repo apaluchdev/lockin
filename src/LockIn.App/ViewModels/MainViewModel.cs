@@ -17,12 +17,15 @@ public sealed partial class MainViewModel : ObservableObject
         GameflowMonitor gameflow,
         SettingsStore settings,
         SettingsViewModel settingsPage,
-        LogViewModel log)
+        LogViewModel log,
+        ChampionDirectory champions)
     {
         _connection = connection;
         _gameflow = gameflow;
         _settings = settings;
         SettingsPage = settingsPage;
+        PicksPage = new PriorityListsViewModel(PriorityListKind.Picks, settings, champions);
+        BansPage = new PriorityListsViewModel(PriorityListKind.Bans, settings, champions);
         Log = log;
 
         var snapshot = settings.Snapshot();
@@ -35,6 +38,10 @@ public sealed partial class MainViewModel : ObservableObject
         gameflow.PhaseChanged += (_, _) => Ui.Post(RefreshStatus);
         RefreshStatus();
     }
+
+    public PriorityListsViewModel PicksPage { get; }
+
+    public PriorityListsViewModel BansPage { get; }
 
     public SettingsViewModel SettingsPage { get; }
 

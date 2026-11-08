@@ -63,10 +63,10 @@
         <!-- Main tabs -->
         <TabControl Grid.Row="1" Margin="12,8,12,0">
             <TabItem Header="Picks">
-                <TextBlock Text="Pick lists are coming in a later milestone." Margin="12" Style="{StaticResource Hint}" />
+                <views:PriorityListsView DataContext="{Binding PicksPage}" />
             </TabItem>
             <TabItem Header="Bans">
-                <TextBlock Text="Ban lists are coming in a later milestone." Margin="12" Style="{StaticResource Hint}" />
+                <views:PriorityListsView DataContext="{Binding BansPage}" />
             </TabItem>
             <TabItem Header="Runes &amp; spells">
                 <TextBlock Text="Runes and spells are coming in a later milestone." Margin="12" Style="{StaticResource Hint}" />

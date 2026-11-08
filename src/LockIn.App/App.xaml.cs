@@ -101,6 +101,7 @@ public partial class App : Application
         services.AddSingleton<StartupRegistration>();
 
         // UI
+        services.AddSingleton<ChampionDirectory>();
         services.AddSingleton<LogViewModel>();
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<MainViewModel>();
