@@ -1,0 +1,3 @@
+[*.cs]
+# View-model members are bound from XAML, which needs instance members.
+dotnet_diagnostic.CA1822.severity = none

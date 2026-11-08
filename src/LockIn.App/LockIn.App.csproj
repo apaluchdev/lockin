@@ -6,12 +6,24 @@
     <UseWPF>true</UseWPF>
     <RootNamespace>LockIn.App</RootNamespace>
     <AssemblyName>LockIn</AssemblyName>
+    <ApplicationIcon>Assets\lockin.ico</ApplicationIcon>
     <!-- The WPF Fluent ThemeMode API is still flagged experimental. -->
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- WPF projects leave System.IO out of implicit usings. -->
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\lockin.ico" />
+    <Resource Include="Assets\lockin.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="H.NotifyIcon.Wpf" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
 

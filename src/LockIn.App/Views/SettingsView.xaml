@@ -1,0 +1,173 @@
+<UserControl x:Class="LockIn.App.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:LockIn.App.ViewModels"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}">
+    <UserControl.Resources>
+        <!-- Two-column row: label + hint on the left, control on the right. -->
+        <Style x:Key="Row" TargetType="Grid">
+            <Setter Property="Margin" Value="0,6" />
+        </Style>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="4,12,12,12" MaxWidth="760" HorizontalAlignment="Left">
+
+            <!-- Accept -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Match found" Style="{StaticResource CardTitle}" />
+                    <Grid Style="{StaticResource Row}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Accept delay (seconds)" Style="{StaticResource SettingLabel}" />
+                            <TextBlock Text="How long to wait before accepting a found match. Auto-accept itself is switched on and off at the top of the window or from the tray."
+                                       Style="{StaticResource Hint}" />
+                        </StackPanel>
+                        <TextBox Grid.Column="1" Style="{StaticResource SecondsBox}"
+                                 Text="{Binding AcceptDelaySeconds, StringFormat={}{0:0.##}, UpdateSourceTrigger=LostFocus}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Bans -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Bans" Style="{StaticResource CardTitle}" />
+                    <CheckBox Content="Ban automatically from my ban lists" IsChecked="{Binding BansEnabled}" Margin="0,0,0,4" />
+                    <Grid Style="{StaticResource Row}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Hover delay (seconds)" Style="{StaticResource SettingLabel}" />
+                            <TextBlock Text="Wait this long after your ban turn starts before hovering, so teammates' ban hovers are visible and can be avoided."
+                                       Style="{StaticResource Hint}" />
+                        </StackPanel>
+                        <TextBox Grid.Column="1" Style="{StaticResource SecondsBox}"
+                                 Text="{Binding BanHoverDelaySeconds, StringFormat={}{0:0.##}, UpdateSourceTrigger=LostFocus}" />
+                    </Grid>
+                    <Grid Style="{StaticResource Row}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Lock in with this many seconds left" Style="{StaticResource SettingLabel}" />
+                            <TextBlock Text="The ban is locked when the timer reaches this value. LockIn checks about 4 times a second."
+                                       Style="{StaticResource Hint}" />
+                        </StackPanel>
+                        <TextBox Grid.Column="1" Style="{StaticResource SecondsBox}"
+                                 Text="{Binding BanLockBeforeEndSeconds, StringFormat={}{0:0.##}, UpdateSourceTrigger=LostFocus}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Picks -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Picks" Style="{StaticResource CardTitle}" />
+                    <CheckBox Content="Pick automatically from my pick lists" IsChecked="{Binding PicksEnabled}" Margin="0,0,0,4" />
+                    <CheckBox Content="Show my top pick as my intent during the planning phase" IsChecked="{Binding PreHoverInPlanning}" Margin="0,4" />
+                    <CheckBox Content="If nothing on my role's list is available, try my Any-role list" IsChecked="{Binding FallBackToAnyRole}" Margin="0,4" />
+                    <Grid Style="{StaticResource Row}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Hover delay (seconds)" Style="{StaticResource SettingLabel}" />
+                            <TextBlock Text="Wait this long after your pick turn starts before hovering. 0 hovers immediately."
+                                       Style="{StaticResource Hint}" />
+                        </StackPanel>
+                        <TextBox Grid.Column="1" Style="{StaticResource SecondsBox}"
+                                 Text="{Binding PickHoverDelaySeconds, StringFormat={}{0:0.##}, UpdateSourceTrigger=LostFocus}" />
+                    </Grid>
+                    <Grid Style="{StaticResource Row}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Lock in with this many seconds left" Style="{StaticResource SettingLabel}" />
+                            <TextBlock Text="Your hovered champion is locked when the timer reaches this value, including one you hovered yourself. 3 or more is recommended."
+                                       Style="{StaticResource Hint}" />
+                        </StackPanel>
+                        <TextBox Grid.Column="1" Style="{StaticResource SecondsBox}"
+                                 Text="{Binding PickLockBeforeEndSeconds, StringFormat={}{0:0.##}, UpdateSourceTrigger=LostFocus}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Runes & spells -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Runes &amp; summoner spells" Style="{StaticResource CardTitle}" />
+                    <CheckBox Content="Apply my rune page and spells when I lock in a champion" IsChecked="{Binding LoadoutsEnabled}" Margin="0,0,0,4" />
+                    <Grid Style="{StaticResource Row}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Flash key" Style="{StaticResource SettingLabel}" />
+                            <TextBlock Text="Keep Flash on the same key for every champion, swapping the two spells if needed."
+                                       Style="{StaticResource Hint}" />
+                        </StackPanel>
+                        <ComboBox Grid.Column="1" Width="140" VerticalAlignment="Center"
+                                  ItemsSource="{Binding FlashKeys}" SelectedItem="{Binding FlashKey}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- General -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="General" Style="{StaticResource CardTitle}" />
+                    <CheckBox Content="Start LockIn with Windows (hidden in the tray)" IsChecked="{Binding StartWithWindows}" Margin="0,4" />
+                    <CheckBox Content="Minimize button hides LockIn to the tray" IsChecked="{Binding MinimizeToTray}" Margin="0,4" />
+                    <CheckBox Content="Also automate picks and bans in custom games" IsChecked="{Binding AutomateCustomGames}" Margin="0,4" />
+                    <TextBlock Text="Closing the window always keeps LockIn running in the tray. Use Exit in the tray menu to quit."
+                               Style="{StaticResource Hint}" Margin="0,2,0,8" />
+                    <Grid Style="{StaticResource Row}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="300" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Margin="0,0,12,0">
+                            <TextBlock Text="League install folder" Style="{StaticResource SettingLabel}" />
+                            <TextBlock Style="{StaticResource Hint}">
+                                <Run Text="Only needed if LockIn can't find the client by itself. Leave empty to use the running client or" />
+                                <Run Text="{Binding DefaultInstallPath, Mode=OneWay}" />
+                            </TextBlock>
+                        </StackPanel>
+                        <TextBox Grid.Column="1" VerticalAlignment="Center"
+                                 Text="{Binding LeagueInstallPath, UpdateSourceTrigger=LostFocus}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- About -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Hint}">
+                        <Run Text="LockIn" />
+                        <Run Text="{Binding Version, Mode=OneWay}" />
+                        <Run Text="· settings are saved automatically to" />
+                        <Run Text="{Binding SettingsFile, Mode=OneWay}" />
+                    </TextBlock>
+                    <Button Content="Open settings folder" Command="{Binding OpenSettingsFolderCommand}"
+                            HorizontalAlignment="Left" Margin="0,8,0,0" />
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

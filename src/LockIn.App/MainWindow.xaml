@@ -4,21 +4,81 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:LockIn.App.ViewModels"
+        xmlns:views="clr-namespace:LockIn.App.Views"
+        xmlns:lcu="clr-namespace:LockIn.Core.Lcu;assembly=LockIn.Core"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="LockIn"
-        Width="900" Height="600"
-        MinWidth="640" MinHeight="420"
+        Icon="/Assets/lockin.ico"
+        Width="1040" Height="760"
+        MinWidth="780" MinHeight="540"
         WindowStartupLocation="CenterScreen">
-    <Grid Margin="24">
-        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-            <TextBlock Text="LockIn"
-                       FontSize="32" FontWeight="SemiBold"
-                       HorizontalAlignment="Center" />
-            <TextBlock Text="{Binding Status}"
-                       Margin="0,8,0,0"
-                       Opacity="0.7"
-                       HorizontalAlignment="Center" />
-        </StackPanel>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" MinHeight="220" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="230" MinHeight="90" />
+        </Grid.RowDefinitions>
+
+        <!-- Status bar -->
+        <Border Grid.Row="0" Padding="16,12" BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Ellipse Width="10" Height="10" Margin="0,0,10,0" VerticalAlignment="Center">
+                    <Ellipse.Style>
+                        <Style TargetType="Ellipse">
+                            <Setter Property="Fill" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ConnectionState}" Value="{x:Static lcu:LcuConnectionState.Connected}">
+                                    <Setter Property="Fill" Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding ConnectionState}" Value="{x:Static lcu:LcuConnectionState.Connecting}">
+                                    <Setter Property="Fill" Value="{DynamicResource SystemFillColorCautionBrush}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Ellipse.Style>
+                </Ellipse>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding ConnectionText}" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding PhaseText}" Margin="12,0,0,0"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <CheckBox Content="Auto-accept" IsChecked="{Binding AutoAcceptEnabled}" Margin="0,0,16,0" />
+                    <CheckBox Content="Champ select automation" IsChecked="{Binding AutomationEnabled}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Main tabs -->
+        <TabControl Grid.Row="1" Margin="12,8,12,0">
+            <TabItem Header="Picks">
+                <TextBlock Text="Pick lists are coming in a later milestone." Margin="12" Style="{StaticResource Hint}" />
+            </TabItem>
+            <TabItem Header="Bans">
+                <TextBlock Text="Ban lists are coming in a later milestone." Margin="12" Style="{StaticResource Hint}" />
+            </TabItem>
+            <TabItem Header="Runes &amp; spells">
+                <TextBlock Text="Runes and spells are coming in a later milestone." Margin="12" Style="{StaticResource Hint}" />
+            </TabItem>
+            <TabItem Header="Settings">
+                <views:SettingsView DataContext="{Binding SettingsPage}" />
+            </TabItem>
+        </TabControl>
+
+        <GridSplitter Grid.Row="2" Height="6" HorizontalAlignment="Stretch" Background="Transparent"
+                      ResizeDirection="Rows" ShowsPreview="False" />
+
+        <views:LogPanel Grid.Row="3" DataContext="{Binding Log}" />
     </Grid>
 </Window>
