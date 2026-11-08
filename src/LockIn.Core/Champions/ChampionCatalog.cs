@@ -244,13 +244,29 @@ public sealed class ChampionCatalog : IHostedService, IDisposable
             .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-    private void Publish(string? version, IReadOnlyList<Champion> champions)
+    private void Publish(string? version, List<Champion> champions)
     {
+        var unique = Deduplicate(champions);
+        if (unique.Count != champions.Count)
+        {
+            _logger.LogDebug("Ignored {Count} duplicate champion entries", champions.Count - unique.Count);
+        }
+
         Version = version ?? Version;
-        All = champions;
-        ById = champions.ToFrozenDictionary(c => c.Id);
+        All = unique;
+        ById = unique.ToFrozenDictionary(c => c.Id);
         ChampionsChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>
+    /// One entry per champion. The client's own lists can include extra copies of a champion for special
+    /// modes (same name, different ID); the real champion always has the lowest ID, so keep that one.
+    /// </summary>
+    internal static List<Champion> Deduplicate(IEnumerable<Champion> champions) =>
+        [.. champions
+            .GroupBy(c => c.Id).Select(g => g.First())
+            .GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase).Select(g => g.MinBy(c => c.Id)!)
+            .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)];
 
     private async Task<T?> GetJsonAsync<T>(string url, CancellationToken cancellationToken)
     {

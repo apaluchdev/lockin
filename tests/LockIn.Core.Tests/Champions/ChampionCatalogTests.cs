@@ -48,6 +48,41 @@ public sealed class ChampionCatalogTests : IDisposable
         Assert.Equal(3, offline.All.Count);
     }
 
+    /// <summary>The old app listed some champions twice: the client also lists special-mode copies (same name, different ID).</summary>
+    [Fact]
+    public void Collapses_mode_variant_and_repeated_entries_to_one_per_champion()
+    {
+        var champions = ChampionCatalog.Deduplicate(
+        [
+            new Champion(3147, "StrawberrySeraphine", "Seraphine"),
+            new Champion(147, "Seraphine", "Seraphine"),
+            new Champion(103, "Ahri", "Ahri"),
+            new Champion(103, "Ahri", "Ahri"),
+            new Champion(62, "MonkeyKing", "Wukong"),
+        ]);
+
+        Assert.Equal([(103, "Ahri"), (147, "Seraphine"), (62, "Wukong")], champions.Select(c => (c.Id, c.Name)));
+    }
+
+    [Fact]
+    public async Task Falls_back_to_the_client_list_without_duplicates()
+    {
+        await using var host = await TestHost.StartAsync(services: s => s.AddSingleton(sp =>
+            new ChampionCatalog(sp.GetRequiredService<LcuConnection>(), sp.GetRequiredService<ILogger<ChampionCatalog>>(), new NoNetworkHandler(), _cache)));
+        host.Client.SetGet("/lol-champions/v1/inventories/1/champions-minimal", new object[] { new { id = 147, freeToPlay = true } });
+        host.Client.SetGet("/lol-game-data/assets/v1/champion-summary.json", new object[]
+        {
+            new { id = -1, name = "None", alias = "None" },
+            new { id = 147, name = "Seraphine", alias = "Seraphine" },
+            new { id = 3147, name = "Seraphine", alias = "StrawberrySeraphine" },
+        });
+        var catalog = host.Host.Services.GetRequiredService<ChampionCatalog>();
+
+        await catalog.RefreshPlayableAsync();
+
+        Assert.Equal(147, Assert.Single(catalog.All).Id);
+    }
+
     [Fact]
     public async Task Downloads_icons_once()
     {
