@@ -480,3 +480,6 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# LockIn: the publish profile holds no secrets and tools/publish.ps1 needs it.
+!src/LockIn.App/Properties/PublishProfiles/win-x64.pubxml
