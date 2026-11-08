@@ -21,6 +21,8 @@ public sealed partial class RankedChampion(ChampionItemViewModel champion) : Obs
 
     [ObservableProperty]
     public partial int Rank { get; set; }
+
+    public override string ToString() => $"{Rank}. {Champion.Name}";
 }
 
 /// <summary>The priority list for one role.</summary>
@@ -33,6 +35,8 @@ public sealed partial class RoleListViewModel(Role role, string title) : Observa
     public ObservableCollection<RankedChampion> Items { get; } = [];
 
     public int Count => Items.Count;
+
+    public override string ToString() => Title;
 
     internal void Renumber()
     {

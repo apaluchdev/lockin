@@ -29,9 +29,16 @@ public sealed class FakeLeagueClient : IAsyncDisposable
     private readonly WebApplication _app;
     private readonly ConcurrentDictionary<string, string> _getResponses = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentBag<WebSocket> _sockets = [];
-    private readonly string _directory = Directory.CreateTempSubdirectory("lockin-fakeclient-").FullName;
+    private readonly string _directory;
+    private readonly bool _ownsDirectory;
 
-    private FakeLeagueClient(WebApplication app) => _app = app;
+    private FakeLeagueClient(WebApplication app, string? installDirectory)
+    {
+        _app = app;
+        _ownsDirectory = installDirectory is null;
+        _directory = installDirectory ?? Directory.CreateTempSubdirectory("lockin-fakeclient-").FullName;
+        Directory.CreateDirectory(_directory);
+    }
 
     public ConcurrentQueue<RecordedRequest> Requests { get; } = new();
 
@@ -43,13 +50,13 @@ public sealed class FakeLeagueClient : IAsyncDisposable
     /// <summary>Folder containing a lockfile pointing at this fake client.</summary>
     public string InstallDirectory => _directory;
 
-    public static async Task<FakeLeagueClient> StartAsync()
+    public static async Task<FakeLeagueClient> StartAsync(string? installDirectory = null)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         var app = builder.Build();
-        var fake = new FakeLeagueClient(app);
+        var fake = new FakeLeagueClient(app, installDirectory);
         app.UseWebSockets();
         app.Run(fake.HandleAsync);
         await app.StartAsync();
@@ -159,6 +166,13 @@ public sealed class FakeLeagueClient : IAsyncDisposable
     {
         await _app.StopAsync();
         await _app.DisposeAsync();
-        Directory.Delete(_directory, recursive: true);
+        if (_ownsDirectory)
+        {
+            Directory.Delete(_directory, recursive: true);
+        }
+        else
+        {
+            File.Delete(Path.Combine(_directory, "lockfile"));
+        }
     }
 }

@@ -189,8 +189,10 @@ public sealed class ChampionCatalog : IHostedService, IDisposable
             }
 
             var playable = inventory.Where(c => c.Id > 0 && c.IsPlayable).Select(c => c.Id).ToFrozenSet();
-            Playable = playable;
-            _logger.LogDebug("You can play {Count} champions right now", playable.Count);
+
+            // An empty inventory means the client hasn't loaded it yet, not that the player owns nothing.
+            Playable = playable.Count > 0 ? playable : null;
+            _logger.LogDebug("You can play {Count} champions right now", playable.Count > 0 ? playable.Count : "an unknown number of");
             PlayableChanged?.Invoke(this, EventArgs.Empty);
 
             if (All.Count == 0)

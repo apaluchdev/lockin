@@ -121,7 +121,7 @@
                             <TextBlock Text="Keep Flash on the same key for every champion, swapping the two spells if needed."
                                        Style="{StaticResource Hint}" />
                         </StackPanel>
-                        <ComboBox Grid.Column="1" Width="140" VerticalAlignment="Center"
+                        <ComboBox Grid.Column="1" Width="140" VerticalAlignment="Center" Margin="16,0,0,0"
                                   ItemsSource="{Binding FlashKeys}" SelectedItem="{Binding FlashKey}" />
                     </Grid>
                 </StackPanel>

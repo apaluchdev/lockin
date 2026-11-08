@@ -6,4 +6,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/LockIn.Core.Tests/LockIn.Core.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/LockIn.FakeClient/LockIn.FakeClient.csproj" />
+  </Folder>
 </Solution>
