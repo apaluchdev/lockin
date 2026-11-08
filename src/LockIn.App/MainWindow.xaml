@@ -1,0 +1,24 @@
+﻿<Window x:Class="LockIn.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:LockIn.App.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
+        Title="LockIn"
+        Width="900" Height="600"
+        MinWidth="640" MinHeight="420"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="24">
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+            <TextBlock Text="LockIn"
+                       FontSize="32" FontWeight="SemiBold"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="{Binding Status}"
+                       Margin="0,8,0,0"
+                       Opacity="0.7"
+                       HorizontalAlignment="Center" />
+        </StackPanel>
+    </Grid>
+</Window>
