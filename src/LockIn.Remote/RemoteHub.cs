@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using LockIn.Core.ChampSelect;
 using LockIn.Core.Live;
+using LockIn.Core.Loadouts;
 using Microsoft.Extensions.Logging;
 
 namespace LockIn.Remote;
@@ -27,6 +28,7 @@ internal sealed class RemoteHub : IDisposable
 
     private readonly LiveStateService _live;
     private readonly ChampSelectService _champSelect;
+    private readonly LoadoutService _loadouts;
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
     private readonly ConcurrentDictionary<Guid, Phone> _phones = new();
@@ -34,10 +36,11 @@ internal sealed class RemoteHub : IDisposable
     private readonly Task _broadcaster;
     private int _dirty = 1;
 
-    public RemoteHub(LiveStateService live, ChampSelectService champSelect, TimeProvider time, ILogger logger)
+    public RemoteHub(LiveStateService live, ChampSelectService champSelect, LoadoutService loadouts, TimeProvider time, ILogger logger)
     {
         _live = live;
         _champSelect = champSelect;
+        _loadouts = loadouts;
         _time = time;
         _logger = logger;
         _live.Changed += OnLiveChanged;
@@ -136,6 +139,11 @@ internal sealed class RemoteHub : IDisposable
                         root.TryGetProperty("championId", out var c) && c.ValueKind == JsonValueKind.Number ? c.GetInt32() : null).ConfigureAwait(false),
                 "lockNow" when kind is ChampSelectService.Pick or ChampSelectService.Ban =>
                     await _champSelect.LockNowAsync(kind).ConfigureAwait(false),
+                "runeOverride" =>
+                    await _loadouts.SetRunePageOverrideAsync(
+                        root.TryGetProperty("pageId", out var p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : null).ConfigureAwait(false),
+                "spellOverride" =>
+                    await _loadouts.SetSpellsOverrideAsync(Spell(root, "spell1Id"), Spell(root, "spell2Id")).ConfigureAwait(false),
                 "ping" => null,
                 _ => "Unknown command",
             };
@@ -149,7 +157,10 @@ internal sealed class RemoteHub : IDisposable
         }
     }
 
-    private string StateMessage() => JsonSerializer.Serialize(new { type = "state", state = _live.Current() }, Json);
+    private static int? Spell(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number ? value.GetInt32() : null;
+
+    private string StateMessage() => JsonSerializer.Serialize(new { type = "state", build = RemoteServer.BuildId, state = _live.Current() }, Json);
 
     private async Task BroadcastLoopAsync()
     {

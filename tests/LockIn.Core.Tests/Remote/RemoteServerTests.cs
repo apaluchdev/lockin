@@ -9,6 +9,7 @@ using LockIn.Core.ChampSelect;
 using LockIn.Core.Hosting;
 using LockIn.Core.Lcu;
 using LockIn.Core.Live;
+using LockIn.Core.Loadouts;
 using LockIn.Core.Settings;
 using LockIn.Core.Tests.Fakes;
 using LockIn.Remote;
@@ -49,6 +50,7 @@ public sealed class RemoteServerTests : IDisposable
                 services.AddSingleton(sp => new ChampionCatalog(sp.GetRequiredService<LcuConnection>(),
                     sp.GetRequiredService<ILogger<ChampionCatalog>>(), new NoNetworkHandler(), _cache));
                 services.AddHostedSingleton<ChampSelectService>();
+                services.AddHostedSingleton<LoadoutService>();
                 services.AddHostedSingleton<LiveStateService>();
                 services.AddHostedSingleton<RemoteServer>();
             });
@@ -203,6 +205,74 @@ public sealed class RemoteServerTests : IDisposable
 
         Assert.Equal("Override", cs.GetProperty("plannedPick").GetProperty("source").GetString());
         Assert.Equal(Orianna, cs.GetProperty("pickOverride").GetInt32());
+    }
+
+    [Fact]
+    public async Task Applies_rune_and_spell_overrides_and_shows_them_live()
+    {
+        var (host, server) = await StartAsync();
+        await using var _ = host;
+        host.Client.SetGet("/lol-perks/v1/pages", new object[]
+        {
+            new { id = 1, name = "Default", isActive = true, isEditable = true },
+            new { id = 42, name = "Burst", isActive = false, isEditable = true },
+        });
+        host.Client.SetGet(LcuEndpoints.GameflowSession, new { gameData = new { queue = new { id = 400, gameMode = "CLASSIC" } } });
+        host.Client.SetGet(LcuEndpoints.GameflowPhase, "ChampSelect");
+        await host.Client.PushAsync(LcuEndpoints.GameflowPhase, "ChampSelect");
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, new
+        {
+            gameId = 7,
+            localPlayerCellId = Me,
+            myTeam = new[] { new { cellId = Me, assignedPosition = "middle", championId = 0 } },
+            actions = new[] { new[] { new { id = 10, actorCellId = Me, type = "pick", isAllyAction = true, isInProgress = false, completed = false, championId = 0 } } },
+            timer = new { phase = "PLANNING", adjustedTimeLeftInPhase = 25_000, totalTimeInPhase = 30_000, internalNowInEpochMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() },
+        });
+        var champSelect = host.Host.Services.GetRequiredService<ChampSelectService>();
+        await host.WaitUntilAsync(() => champSelect.View is not null, "see champ select");
+        using var socket = await ConnectAsync(server, server.Key);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, Http(server, "/api/loadout-options"));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", server.Key);
+        var options = await (await _http.SendAsync(request)).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Burst", options.GetProperty("pages")[1].GetProperty("name").GetString());
+        Assert.Equal(SummonerSpells.All.Count, options.GetProperty("spells").GetArrayLength());
+
+        await SendAsync(socket, new { type = "runeOverride", pageId = 42, id = 1 });
+        Assert.True((await ReceiveAsync(socket, "result")).GetProperty("ok").GetBoolean());
+        await SendAsync(socket, new { type = "spellOverride", spell1Id = 14, spell2Id = 4, id = 2 });
+        Assert.True((await ReceiveAsync(socket, "result")).GetProperty("ok").GetBoolean());
+
+        Assert.Equal("42", Assert.Single(host.Client.RequestsTo("PUT", "/lol-perks/v1/currentpage")).Body);
+        var spells = Assert.Single(host.Client.RequestsTo("PATCH", "/lol-champ-select/v1/session/my-selection")).Json;
+        Assert.Equal((14, 4), (spells.GetProperty("spell1Id").GetInt32(), spells.GetProperty("spell2Id").GetInt32()));
+
+        JsonElement loadout;
+        do
+        {
+            loadout = (await ReceiveAsync(socket, "state")).GetProperty("state").GetProperty("loadout");
+        }
+        while (loadout.ValueKind == JsonValueKind.Null || !loadout.GetProperty("spellOverride").GetBoolean());
+
+        Assert.Equal("Burst", loadout.GetProperty("runePage").GetString());
+        Assert.True(loadout.GetProperty("runeOverride").GetBoolean());
+        Assert.Equal(("Ignite", "Flash"), (loadout.GetProperty("spell1").GetString(), loadout.GetProperty("spell2").GetString()));
+    }
+
+    [Fact]
+    public async Task Page_and_live_feed_carry_the_same_build_id()
+    {
+        var (host, server) = await StartAsync();
+        await using var _ = host;
+
+        var page = await _http.GetStringAsync(Http(server, "/"));
+        using var socket = await ConnectAsync(server, server.Key);
+        var state = await ReceiveAsync(socket, "state");
+
+        Assert.Equal(16, RemoteServer.BuildId.Length);
+        Assert.Contains($"name=\"lockin-build\" content=\"{RemoteServer.BuildId}\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("__LOCKIN_BUILD__", page, StringComparison.Ordinal);
+        Assert.Equal(RemoteServer.BuildId, state.GetProperty("build").GetString());
     }
 
     [Fact]

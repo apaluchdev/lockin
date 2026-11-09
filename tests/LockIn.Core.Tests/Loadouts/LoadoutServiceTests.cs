@@ -34,6 +34,125 @@ public sealed class LoadoutServiceTests : IDisposable
         return (host, host.Host.Services.GetRequiredService<LoadoutService>());
     }
 
+    private const string RunesPath = "/lol-perks/v1/currentpage";
+    private const string SpellsPath = "/lol-champ-select/v1/session/my-selection";
+
+    private static object Session(bool locked) => new
+    {
+        gameId = 1,
+        localPlayerCellId = 0,
+        myTeam = new[] { new { cellId = 0, assignedPosition = "middle", championId = locked ? Ahri : 0 } },
+        actions = new[] { new[] { new { id = 5, actorCellId = 0, type = "pick", isAllyAction = true, isInProgress = !locked, completed = locked, championId = locked ? Ahri : 0 } } },
+        timer = new { phase = "BAN_PICK", adjustedTimeLeftInPhase = 20_000, totalTimeInPhase = 30_000, internalNowInEpochMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() },
+    };
+
+    private static async Task EnterChampSelectAsync(TestHost host)
+    {
+        host.Client.SetGet(LcuEndpoints.GameflowSession, new { gameData = new { queue = new { id = 400, gameMode = "CLASSIC" } } });
+        host.Client.SetGet("/" + LoadoutService.PagesPath, new object[]
+        {
+            new { id = 1, name = "Default", isActive = true, isEditable = true },
+            new { id = 42, name = "Ahri mid", isActive = false, isEditable = true },
+            new { id = 43, name = "Poke", isActive = false, isEditable = true },
+        });
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, Session(locked: false));
+        var champSelect = host.Host.Services.GetRequiredService<ChampSelectService>();
+        await host.WaitUntilAsync(() => champSelect.View is not null, "see champ select");
+    }
+
+    [Fact]
+    public async Task A_rune_override_applies_now_and_beats_the_saved_page_at_lock_in()
+    {
+        var (host, service) = await StartAsync(s =>
+            s.Loadouts.Champions[Ahri] = new ChampionLoadout { RunePageId = 42, RunePageName = "Ahri mid" });
+        await using var _ = host;
+        await EnterChampSelectAsync(host);
+
+        Assert.Null(await service.SetRunePageOverrideAsync(43));
+        Assert.Equal("43", Assert.Single(host.Client.RequestsTo("PUT", RunesPath)).Body);
+
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, Session(locked: true));
+
+        await host.WaitUntilAsync(() => host.Client.RequestsTo("PUT", RunesPath).Count() >= 2, "re-apply at lock-in");
+        Assert.All(host.Client.RequestsTo("PUT", RunesPath), r => Assert.Equal("43", r.Body));
+    }
+
+    [Fact]
+    public async Task Spell_overrides_stay_on_the_chosen_keys_despite_the_flash_preference()
+    {
+        var (host, service) = await StartAsync(s =>
+        {
+            s.Loadouts.FlashKey = FlashKey.F;
+            s.Loadouts.Champions[Ahri] = new ChampionLoadout { Spell1Id = 12, Spell2Id = Flash };
+        });
+        await using var _ = host;
+        await EnterChampSelectAsync(host);
+
+        Assert.Null(await service.SetSpellsOverrideAsync(Flash, Ignite));
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, Session(locked: true));
+
+        await host.WaitUntilAsync(() => host.Client.RequestsTo("PATCH", SpellsPath).Count() >= 2, "re-apply at lock-in");
+        Assert.All(host.Client.RequestsTo("PATCH", SpellsPath), r =>
+            Assert.Equal((Flash, Ignite), (r.Json.GetProperty("spell1Id").GetInt32(), r.Json.GetProperty("spell2Id").GetInt32())));
+    }
+
+    [Fact]
+    public async Task Clearing_an_override_after_lock_in_restores_the_saved_setup()
+    {
+        var (host, service) = await StartAsync(s =>
+            s.Loadouts.Champions[Ahri] = new ChampionLoadout { RunePageId = 42, RunePageName = "Ahri mid" });
+        await using var _ = host;
+        await EnterChampSelectAsync(host);
+        Assert.Null(await service.SetRunePageOverrideAsync(43));
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, Session(locked: true));
+        await host.WaitUntilAsync(() => host.Client.RequestsTo("PUT", RunesPath).Count() >= 2, "re-apply at lock-in");
+
+        Assert.Null(await service.SetRunePageOverrideAsync(null));
+
+        Assert.Equal("42", host.Client.RequestsTo("PUT", RunesPath).Last().Body);
+    }
+
+    [Fact]
+    public async Task Overrides_end_with_the_champ_select()
+    {
+        var (host, service) = await StartAsync(s =>
+            s.Loadouts.Champions[Ahri] = new ChampionLoadout { RunePageId = 42, RunePageName = "Ahri mid" });
+        await using var _ = host;
+        await EnterChampSelectAsync(host);
+        Assert.Null(await service.SetRunePageOverrideAsync(43));
+        var champSelect = host.Host.Services.GetRequiredService<ChampSelectService>();
+
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, null, "Delete");
+        await host.WaitUntilAsync(() => champSelect.View is null, "leave champ select");
+        await service.ApplyAsync(Ahri, host.Settings.Snapshot());
+
+        Assert.Equal("42", host.Client.RequestsTo("PUT", RunesPath).Last().Body);
+    }
+
+    [Theory]
+    [InlineData(4, 4, "Choose two different spells")]
+    [InlineData(4, null, "Choose a spell for both D and F")]
+    [InlineData(4, 999, "Unknown summoner spell")]
+    public async Task Rejects_invalid_spell_choices(int? d, int? f, string error)
+    {
+        var (host, service) = await StartAsync(_ => { });
+        await using var __ = host;
+        await EnterChampSelectAsync(host);
+
+        Assert.Equal(error, await service.SetSpellsOverrideAsync(d, f));
+        Assert.Empty(host.Client.RequestsTo("PATCH", SpellsPath));
+    }
+
+    [Fact]
+    public async Task Refuses_overrides_outside_champ_select()
+    {
+        var (host, service) = await StartAsync(_ => { });
+        await using var __ = host;
+
+        Assert.Equal("You're not in champ select", await service.SetRunePageOverrideAsync(42));
+        Assert.Equal("You're not in champ select", await service.SetSpellsOverrideAsync(Flash, Ignite));
+    }
+
     [Fact]
     public async Task Applies_spells_with_the_flash_preference_and_the_saved_rune_page()
     {

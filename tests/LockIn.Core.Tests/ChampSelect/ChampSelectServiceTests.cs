@@ -68,6 +68,42 @@ public sealed class ChampSelectServiceTests : IDisposable
         id = 10, actorCellId = Me, type = "pick", isAllyAction = true, isInProgress = inProgress, completed, championId,
     };
 
+    [Theory]
+    [InlineData("CLASSIC", false, false, true)]
+    [InlineData("ARAM", false, true, false)]
+    [InlineData("CLASSIC", true, false, false)]
+    [InlineData("CLASSIC", true, true, true)]
+    [InlineData("PRACTICETOOL", true, false, false)]
+    [InlineData("PRACTICETOOL", true, true, true)]
+    [InlineData("ARAM", true, true, false)]
+    public void Decides_which_games_to_automate(string gameMode, bool isCustom, bool allowCustom, bool expected) =>
+        Assert.Equal(expected, ChampSelectService.ShouldAutomate(gameMode, isCustom, allowCustom));
+
+    [Fact]
+    public async Task Automates_practice_tool_when_custom_games_are_enabled()
+    {
+        await using var host = await StartAsync(s => s.General.AutomateCustomGames = true);
+        host.Client.SetGet(LcuEndpoints.GameflowSession, new { gameData = new { isCustomGame = true, queue = new { id = 0, gameMode = "PRACTICETOOL" } } });
+
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, Session(1_000, [PickAction()]));
+
+        await host.WaitUntilAsync(
+            () => host.Client.RequestsTo("PATCH", "/lol-champ-select/v1/session/actions/10").Any(r => r.Body.Contains("\"completed\":true", StringComparison.Ordinal)),
+            "lock in during Practice Tool");
+    }
+
+    [Fact]
+    public async Task Says_where_the_custom_games_setting_is()
+    {
+        await using var host = await StartAsync();
+        host.Client.SetGet(LcuEndpoints.GameflowSession, new { gameData = new { isCustomGame = true, queue = new { id = 0, gameMode = "PRACTICETOOL" } } });
+
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, Session(1_000, [PickAction()]));
+
+        await host.WaitUntilAsync(() => host.Logs.Messages.Any(m => m.Contains("Settings tab in LockIn on your PC", StringComparison.Ordinal)), "name the setting");
+        Assert.Empty(host.Client.RequestsTo("PATCH", "/lol-champ-select"));
+    }
+
     [Fact]
     public async Task Hovers_then_locks_when_the_stale_timer_runs_down_with_no_client_updates()
     {

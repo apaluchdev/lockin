@@ -1,6 +1,7 @@
 using LockIn.Core.ChampSelect;
 using LockIn.Core.Gameflow;
 using LockIn.Core.Lcu;
+using LockIn.Core.Loadouts;
 using LockIn.Core.Matchmaking;
 using LockIn.Core.Settings;
 using Microsoft.Extensions.Hosting;
@@ -32,6 +33,9 @@ public sealed record LiveSnapshot
 
     public ChampSelectView? ChampSelect { get; init; }
 
+    /// <summary>The rune page and spells this champ select will use; null outside champ select.</summary>
+    public LoadoutView? Loadout { get; init; }
+
     public required IReadOnlyList<DecisionEntry> Decisions { get; init; }
 }
 
@@ -40,6 +44,7 @@ public sealed class LiveStateService(
     LcuConnection connection,
     GameflowMonitor gameflow,
     ChampSelectService champSelect,
+    LoadoutService loadouts,
     SettingsStore settings,
     TimeProvider time) : IHostedService
 {
@@ -52,6 +57,7 @@ public sealed class LiveStateService(
     {
         var s = settings.Snapshot();
         var phase = connection.State == LcuConnectionState.Connected ? gameflow.Phase : GameflowMonitor.None;
+        var view = phase == GameflowMonitor.ChampSelect ? champSelect.View : null;
         return new LiveSnapshot
         {
             ServerTime = time.GetUtcNow().ToUnixTimeMilliseconds(),
@@ -67,7 +73,8 @@ public sealed class LiveStateService(
             ReadyCheck = phase == GameflowMonitor.ReadyCheck ? _readyCheck : null,
             AutoAccept = s.AutoAcceptEnabled,
             Automation = s.AutomationEnabled,
-            ChampSelect = phase == GameflowMonitor.ChampSelect ? champSelect.View : null,
+            ChampSelect = view,
+            Loadout = loadouts.ViewFor(view, s),
             Decisions = champSelect.RecentDecisions,
         };
     }
@@ -78,6 +85,7 @@ public sealed class LiveStateService(
         connection.EventReceived += OnEvent;
         gameflow.PhaseChanged += Raise;
         champSelect.ViewChanged += Raise;
+        loadouts.Changed += Raise;
         settings.Changed += Raise;
         return Task.CompletedTask;
     }
@@ -88,6 +96,7 @@ public sealed class LiveStateService(
         connection.EventReceived -= OnEvent;
         gameflow.PhaseChanged -= Raise;
         champSelect.ViewChanged -= Raise;
+        loadouts.Changed -= Raise;
         settings.Changed -= Raise;
         return Task.CompletedTask;
     }

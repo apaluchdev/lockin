@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b1118">
   <meta name="color-scheme" content="dark">
+  <meta name="lockin-build" content="__LOCKIN_BUILD__">
   <title>LockIn</title>
   <link rel="icon" href="/icon.png">
   <link rel="apple-touch-icon" href="/icon.png">
@@ -74,6 +75,24 @@
         <p id="autoNote" class="note" hidden></p>
       </section>
 
+      <section id="loadoutCard" class="card" hidden>
+        <h2>Runes &amp; spells</h2>
+        <div class="loadout-row">
+          <div class="loadout-info">
+            <div class="plan-label">Rune page</div>
+            <div id="runeName" class="loadout-value"></div>
+          </div>
+          <button type="button" data-loadout="runes">Change</button>
+        </div>
+        <div class="loadout-row">
+          <div class="loadout-info">
+            <div class="plan-label">Summoner spells</div>
+            <div id="spellNames" class="loadout-value"></div>
+          </div>
+          <button type="button" data-loadout="spells">Change</button>
+        </div>
+      </section>
+
       <section id="teamsCard" class="card teams" hidden>
         <div class="team-grid">
           <div class="team ally">
@@ -113,6 +132,25 @@
       </div>
       <h3>All champions</h3>
       <div id="all" class="grid"></div>
+    </div>
+  </div>
+
+  <!-- Rune page / summoner spell overrides. -->
+  <div id="loadoutSheet" class="sheet" hidden>
+    <div class="sheet-backdrop" data-close></div>
+    <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="loadoutTitle">
+      <div class="sheet-head">
+        <h2 id="loadoutTitle">Choose</h2>
+        <button type="button" class="ghost" data-close aria-label="Close">✕</button>
+      </div>
+      <p class="sheet-hint">Applies right away, for this champ select only. Your saved setup doesn't change.</p>
+      <div id="runeOptions" class="option-list"></div>
+      <form id="spellOptions" class="spell-form">
+        <label>Spell on D<select id="spell1"></select></label>
+        <label>Spell on F<select id="spell2"></select></label>
+        <button type="submit" class="primary wide">Use these spells</button>
+      </form>
+      <button type="button" id="clearLoadout" class="wide" hidden>Use my saved setup again</button>
     </div>
   </div>
 

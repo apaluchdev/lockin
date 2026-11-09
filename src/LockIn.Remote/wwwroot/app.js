@@ -24,6 +24,7 @@ let state = null;
 let champions = new Map();    // id → { id, name, playable }
 let lists = { picks: {}, bans: {} };
 let sheetKind = null;
+let loadoutMode = null;
 let requestSeq = 0;
 
 // ── Key handling ─────────────────────────────────────────────────────
@@ -120,6 +121,7 @@ function connect() {
     lastMessageAt = Date.now();
     const message = JSON.parse(event.data);
     if (message.type === "state") {
+      if (reloadIfOutdated(message.build)) return;
       clockOffset = message.state.serverTime - Date.now();
       state = message.state;
       render();
@@ -136,6 +138,21 @@ function connect() {
     setPulse("down", "Reconnecting…");
     scheduleReconnect();
   });
+}
+
+// A tab left open across a LockIn update reconnects but keeps running the old page, so load the new one.
+// Remembers the attempt so a stale cached page can't cause a reload loop.
+function reloadIfOutdated(build) {
+  const mine = document.querySelector('meta[name="lockin-build"]')?.content;
+  if (!build || !mine || build === mine) return false;
+  try {
+    if (sessionStorage.getItem("lockin.reloadedFor") === build) return false;
+    sessionStorage.setItem("lockin.reloadedFor", build);
+  } catch {
+    return false;
+  }
+  location.reload();
+  return true;
 }
 
 function scheduleReconnect() {
@@ -220,6 +237,7 @@ function render() {
   renderStatus(cs);
   renderReadyCheck();
   renderMine(cs);
+  renderLoadout();
   renderTeams(cs);
   renderDecisions();
 }
@@ -315,6 +333,20 @@ function renderPlan(kind, plan, override, canLock, visible) {
   box.querySelector(`[data-lock="${kind}"]`).hidden = !canLock;
 }
 
+function renderLoadout() {
+  const loadout = state.loadout;
+  $("loadoutCard").hidden = !loadout;
+  if (!loadout) return;
+
+  const rune = $("runeName");
+  rune.textContent = loadout.runePage || "Your current page";
+  if (loadout.runeOverride) rune.append(el("span", "badge override", "Override"));
+
+  const spells = $("spellNames");
+  spells.textContent = `${loadout.spell1 || "—"} (D) · ${loadout.spell2 || "—"} (F)`;
+  if (loadout.spellOverride) spells.append(el("span", "badge override", "Override"));
+}
+
 function renderTeams(cs) {
   $("teamsCard").hidden = !cs;
   if (!cs) return;
@@ -373,7 +405,83 @@ document.addEventListener("click", (event) => {
   if (change) openSheet(change.dataset.change);
   const lock = event.target.closest("[data-lock]");
   if (lock) send({ type: "lockNow", kind: lock.dataset.lock });
+  const loadout = event.target.closest("[data-loadout]");
+  if (loadout) openLoadoutSheet(loadout.dataset.loadout);
+  const page = event.target.closest("[data-page]");
+  if (page) {
+    send({ type: "runeOverride", pageId: Number(page.dataset.page) });
+    closeSheet();
+  }
   if (event.target.closest("[data-close]")) closeSheet();
+});
+
+async function openLoadoutSheet(mode) {
+  let options;
+  try {
+    const response = await fetch("/api/loadout-options", { headers: { Authorization: "Bearer " + key } });
+    if (!response.ok) throw new Error(String(response.status));
+    options = await response.json();
+  } catch {
+    toast("Couldn't load your rune pages and spells", "bad");
+    return;
+  }
+
+  loadoutMode = mode;
+  const runes = mode === "runes";
+  $("loadoutTitle").textContent = runes ? "Choose a rune page" : "Choose summoner spells";
+  $("runeOptions").hidden = !runes;
+  $("spellOptions").hidden = runes;
+  $("clearLoadout").hidden = !(runes ? state?.loadout?.runeOverride : state?.loadout?.spellOverride);
+
+  if (runes) {
+    const buttons = options.pages.map((p) => {
+      const button = el("button", p.isActive ? "selected" : "", p.name);
+      button.type = "button";
+      button.dataset.page = p.id;
+      if (p.isActive) button.append(el("span", "badge", "Current"));
+      return button;
+    });
+    $("runeOptions").replaceChildren(...(buttons.length ? buttons : [el("p", "option-empty", "No saved rune pages found.")]));
+  } else {
+    fillSpellSelect($("spell1"), options.spells, state?.loadout?.spell1Id);
+    fillSpellSelect($("spell2"), options.spells, state?.loadout?.spell2Id);
+  }
+
+  $("loadoutSheet").hidden = false;
+}
+
+function fillSpellSelect(select, spells, current) {
+  const placeholder = el("option", null, "Choose…");
+  placeholder.value = "";
+  select.replaceChildren(placeholder, ...spells.map((s) => {
+    const option = el("option", null, s.name);
+    option.value = s.id;
+    return option;
+  }));
+  select.value = current == null ? "" : String(current);
+}
+
+$("spellOptions").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const d = Number($("spell1").value);
+  const f = Number($("spell2").value);
+  if (!d || !f) {
+    toast("Choose a spell for both D and F", "bad");
+    return;
+  }
+  if (d === f) {
+    toast("Choose two different spells", "bad");
+    return;
+  }
+  send({ type: "spellOverride", spell1Id: d, spell2Id: f });
+  closeSheet();
+});
+
+$("clearLoadout").addEventListener("click", () => {
+  send(loadoutMode === "runes"
+    ? { type: "runeOverride", pageId: null }
+    : { type: "spellOverride", spell1Id: null, spell2Id: null });
+  closeSheet();
 });
 
 function openSheet(kind) {
@@ -395,7 +503,9 @@ function openSheet(kind) {
 
 function closeSheet() {
   $("sheet").hidden = true;
+  $("loadoutSheet").hidden = true;
   sheetKind = null;
+  loadoutMode = null;
 }
 
 function filterAll() {
@@ -435,7 +545,7 @@ $("clearOverride").addEventListener("click", () => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !$("sheet").hidden) closeSheet();
+  if (event.key === "Escape") closeSheet();
 });
 
 // ── Toast ────────────────────────────────────────────────────────────

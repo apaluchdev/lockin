@@ -39,6 +39,12 @@ public sealed record ChampSelectView
 
     public int? BanOverride { get; init; }
 
+    /// <summary>The local player's current summoner spell on D (0 for none).</summary>
+    public int MySpell1Id { get; init; }
+
+    /// <summary>The local player's current summoner spell on F (0 for none).</summary>
+    public int MySpell2Id { get; init; }
+
     public bool CanLockPick { get; init; }
 
     public bool CanLockBan { get; init; }
@@ -130,6 +136,8 @@ internal static class ChampSelectViewBuilder
             PlannedBan = plan?.Ban,
             PickOverride = pickOverride,
             BanOverride = banOverride,
+            MySpell1Id = session.LocalPlayer?.Spell1Id ?? 0,
+            MySpell2Id = session.LocalPlayer?.Spell2Id ?? 0,
             CanLockPick = canLock && myTurnAction!.Type == ChampSelectAction.Pick,
             CanLockBan = canLock && myTurnAction!.Type == ChampSelectAction.Ban,
             Automated = automated,

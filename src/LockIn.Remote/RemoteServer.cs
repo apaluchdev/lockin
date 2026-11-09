@@ -1,9 +1,12 @@
 using System.Net;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using LockIn.Core.Champions;
 using LockIn.Core.ChampSelect;
 using LockIn.Core.Live;
+using LockIn.Core.Loadouts;
 using LockIn.Core.Settings;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -22,11 +25,17 @@ namespace LockIn.Remote;
 /// </summary>
 public sealed class RemoteServer : IHostedService, IAsyncDisposable
 {
+    private const string BuildPlaceholder = "__LOCKIN_BUILD__";
+
     private static readonly Dictionary<string, (string ContentType, byte[] Bytes)> StaticFiles = LoadStaticFiles();
+
+    /// <summary>Identifies this version of the phone page, so a page left open across an update can reload itself.</summary>
+    internal static string BuildId { get; } = ComputeBuildId();
 
     private readonly SettingsStore _settings;
     private readonly LiveStateService _live;
     private readonly ChampSelectService _champSelect;
+    private readonly LoadoutService _loadouts;
     private readonly ChampionCatalog _catalog;
     private readonly TimeProvider _time;
     private readonly ILogger<RemoteServer> _logger;
@@ -37,12 +46,13 @@ public sealed class RemoteServer : IHostedService, IAsyncDisposable
     private int _configuredPort = -1;
     private int _disposed;
 
-    public RemoteServer(SettingsStore settings, LiveStateService live, ChampSelectService champSelect, ChampionCatalog catalog,
-        TimeProvider time, ILogger<RemoteServer> logger)
+    public RemoteServer(SettingsStore settings, LiveStateService live, ChampSelectService champSelect, LoadoutService loadouts,
+        ChampionCatalog catalog, TimeProvider time, ILogger<RemoteServer> logger)
     {
         _settings = settings;
         _live = live;
         _champSelect = champSelect;
+        _loadouts = loadouts;
         _catalog = catalog;
         _time = time;
         _logger = logger;
@@ -170,7 +180,7 @@ public sealed class RemoteServer : IHostedService, IAsyncDisposable
         });
 
         var app = builder.Build();
-        var hub = new RemoteHub(_live, _champSelect, _time, _logger);
+        var hub = new RemoteHub(_live, _champSelect, _loadouts, _time, _logger);
         hub.CountChanged += (_, _) => StatusChanged?.Invoke(this, EventArgs.Empty);
         Map(app, hub);
 
@@ -230,10 +240,13 @@ public sealed class RemoteServer : IHostedService, IAsyncDisposable
 
         foreach (var (path, file) in StaticFiles)
         {
+            var bytes = path == "index.html"
+                ? Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(file.Bytes).Replace(BuildPlaceholder, BuildId, StringComparison.Ordinal))
+                : file.Bytes;
             app.MapGet(path == "index.html" ? "/" : "/" + path, (HttpContext context) =>
             {
                 context.Response.Headers.CacheControl = "no-cache";
-                return Results.Bytes(file.Bytes, file.ContentType);
+                return Results.Bytes(bytes, file.ContentType);
             });
         }
 
@@ -293,6 +306,22 @@ public sealed class RemoteServer : IHostedService, IAsyncDisposable
             }, RemoteHub.Json);
         });
 
+        app.MapGet("/api/loadout-options", async (HttpContext context) =>
+        {
+            if (!IsAuthorized(context))
+            {
+                return Results.Unauthorized();
+            }
+
+            var pages = await _loadouts.GetRunePagesAsync().ConfigureAwait(false) ?? [];
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Json(new
+            {
+                pages = pages.Select(p => new { p.Id, p.Name, p.IsActive }),
+                spells = SummonerSpells.All,
+            }, RemoteHub.Json);
+        });
+
         app.Map("/ws", async (HttpContext context) =>
         {
             if (!context.WebSockets.IsWebSocketRequest)
@@ -333,6 +362,18 @@ public sealed class RemoteServer : IHostedService, IAsyncDisposable
         return string.IsNullOrEmpty(origin)
             || (Uri.TryCreate(origin, UriKind.Absolute, out var uri)
                 && string.Equals(uri.Authority, context.Request.Host.Value, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ComputeBuildId()
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var (path, file) in StaticFiles.OrderBy(f => f.Key, StringComparer.Ordinal))
+        {
+            hash.AppendData(Encoding.UTF8.GetBytes(path));
+            hash.AppendData(file.Bytes);
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset())[..16];
     }
 
     private static Dictionary<string, (string, byte[])> LoadStaticFiles()

@@ -351,11 +351,11 @@ public sealed class ChampSelectService(
         Decide($"Champ select started: {queue}. Role: {ChampSelectPlanner.RoleName(role)}"
             + (pickNumber > 0 ? $", you're pick {pickNumber} of {myPicks.Count} on your team" : ""));
 
-        _automate = gameMode is null or "CLASSIC" && (!isCustom || s.General.AutomateCustomGames);
+        _automate = ShouldAutomate(gameMode, isCustom, s.General.AutomateCustomGames);
         if (!_automate)
         {
-            _notAutomatedReason = isCustom
-                ? "Custom game — picks and bans are up to you (enable custom games in Settings to change this)"
+            _notAutomatedReason = isCustom && !s.General.AutomateCustomGames
+                ? "Custom game — picks and bans are up to you. To change this, tick \"Also automate picks and bans in custom games\" under General on the Settings tab in LockIn on your PC"
                 : $"LockIn only automates Summoner's Rift picks and bans; in {gameMode} they're up to you";
             Decide(_notAutomatedReason);
         }
@@ -372,6 +372,15 @@ public sealed class ChampSelectService(
 
         await RefreshAvailabilityAsync(stoppingToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Summoner's Rift is automated. Custom games need the setting, and Practice Tool counts as one:
+    /// the client reports it as a custom game with the mode "PRACTICETOOL".
+    /// </summary>
+    internal static bool ShouldAutomate(string? gameMode, bool isCustom, bool automateCustomGames) =>
+        isCustom
+            ? automateCustomGames && gameMode is null or "CLASSIC" or "PRACTICETOOL"
+            : gameMode is null or "CLASSIC";
 
     private async Task<(string Queue, bool IsCustom, string? GameMode)> ReadQueueAsync(CancellationToken stoppingToken)
     {
