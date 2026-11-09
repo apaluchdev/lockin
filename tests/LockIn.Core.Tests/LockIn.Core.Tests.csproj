@@ -21,6 +21,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Real champ select snapshots from the League client (trimmed), replayed by tests. -->
+    <None Update="Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\LockIn.Core\LockIn.Core.csproj" />
     <ProjectReference Include="..\..\src\LockIn.Remote\LockIn.Remote.csproj" />
   </ItemGroup>

@@ -44,6 +44,9 @@ public sealed class FakeLeagueClient : IAsyncDisposable
 
     public ConcurrentBag<string> Subscriptions { get; } = [];
 
+    /// <summary>Optional: return a message to answer a non-GET request with a 500 error (it is still recorded).</summary>
+    public Func<RecordedRequest, string?>? Reject { get; set; }
+
     /// <summary>Optional hook for non-GET requests, e.g. to update state and push an event.</summary>
     public Func<RecordedRequest, Task>? OnRequest { get; set; }
 
@@ -124,6 +127,15 @@ public sealed class FakeLeagueClient : IAsyncDisposable
         using var reader = new StreamReader(context.Request.Body);
         var request = new RecordedRequest(context.Request.Method, path, await reader.ReadToEndAsync());
         Requests.Enqueue(request);
+        if (Reject?.Invoke(request) is { } rejection)
+        {
+            // Like the real client turning a request down: an error status with a message.
+            context.Response.StatusCode = 500;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(new { errorCode = "RPC_ERROR", httpStatus = 500, message = rejection }));
+            return;
+        }
+
         if (OnRequest is { } hook)
         {
             await hook(request);

@@ -64,6 +64,12 @@ public sealed class ChampSelectMemory
 
     /// <summary>"pick" and/or "ban": lock in immediately (requested from the phone).</summary>
     public HashSet<string> LockNowRequested { get; } = [];
+
+    /// <summary>Champions the client turned down for a ban (more than once), so the planner moves on to the next one.</summary>
+    public HashSet<int> RefusedBans { get; } = [];
+
+    /// <summary>Champions the client turned down for a pick (more than once), so the planner moves on to the next one.</summary>
+    public HashSet<int> RefusedPicks { get; } = [];
 }
 
 public enum ChampSelectCommandKind
@@ -119,10 +125,9 @@ public static class ChampSelectPlanner
         ChampSelectMemory memory,
         long nowMs,
         IReadOnlySet<int>? playable = null,
-        IReadOnlySet<int>? bannable = null,
         Func<int, string>? nameOf = null)
     {
-        var ctx = new Context(session, options, memory, nowMs, playable, bannable, nameOf ?? (id => $"champion #{id}"));
+        var ctx = new Context(session, options, memory, nowMs, playable, nameOf ?? (id => $"champion #{id}"));
         var commands = new List<ChampSelectCommand>();
         var notes = new List<DecisionNote>();
 
@@ -147,7 +152,20 @@ public static class ChampSelectPlanner
 
         if (myUpcomingBan is { IsInProgress: true } myBan)
         {
-            plannedBan = PlanTurn(ctx, myBan, isBan: true, ban, commands, notes);
+            // The client marks the ban as "in progress" from the planning phase on, but only accepts it once
+            // the ban phase starts. Acting earlier gets rejected, so just say what we'll do.
+            if (session.Timer.Phase == ChampSelectTimer.Planning)
+            {
+                if (ban is not null)
+                {
+                    notes.Add(new("ban-choice", ban.Explanation));
+                    notes.Add(new("ban-turn", ban.ChampionId is { } next ? $"Planning: will ban {ctx.Name(next)} when the ban phase starts" : "Planning: no ban available from your lists"));
+                }
+            }
+            else
+            {
+                plannedBan = PlanTurn(ctx, myBan, isBan: true, ban, commands, notes);
+            }
         }
 
         if (myPick is not null && options.PicksEnabled)
@@ -294,14 +312,13 @@ public static class ChampSelectPlanner
     private sealed class Context
     {
         public Context(ChampSelectSession session, ChampSelectOptions options, ChampSelectMemory memory, long nowMs,
-            IReadOnlySet<int>? playable, IReadOnlySet<int>? bannable, Func<int, string> nameOf)
+            IReadOnlySet<int>? playable, Func<int, string> nameOf)
         {
             Session = session;
             Options = options;
             Memory = memory;
             NowMs = nowMs;
             Playable = playable;
-            Bannable = bannable;
             Name = nameOf;
             Actions = [.. session.AllActions];
             Role = RoleFromPosition(session.LocalPlayer?.AssignedPosition);
@@ -333,8 +350,6 @@ public static class ChampSelectPlanner
         public long NowMs { get; }
 
         public IReadOnlySet<int>? Playable { get; }
-
-        public IReadOnlySet<int>? Bannable { get; }
 
         public Func<int, string> Name { get; }
 
@@ -387,6 +402,7 @@ public static class ChampSelectPlanner
                 : Picked.Contains(id) ? "already picked"
                 : AllyWants.Contains(id) ? "a teammate wants it"
                 : Playable is not null && !Playable.Contains(id) ? "you don't own it"
+                : Memory.RefusedPicks.Contains(id) ? "the League client refused it"
                 : null;
 
             return WithOverride(Options.PickOverride, "pick", WhyNot, () => Choose(lists, Options.PickLists, "pick", WhyNot));
@@ -404,7 +420,7 @@ public static class ChampSelectPlanner
                 : AllyBanHovers.Contains(id) ? "a teammate is banning it"
                 : AllyWants.Contains(id) ? "a teammate wants it"
                 : Picked.Contains(id) ? "already picked"
-                : Bannable is not null && !Bannable.Contains(id) ? "can't be banned"
+                : Memory.RefusedBans.Contains(id) ? "the League client refused it"
                 : null;
 
             return WithOverride(Options.BanOverride, "ban", WhyNot, () => Choose([list], Options.BanLists, "ban", WhyNot));

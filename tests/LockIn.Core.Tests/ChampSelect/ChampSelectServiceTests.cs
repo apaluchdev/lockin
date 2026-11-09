@@ -42,8 +42,85 @@ public sealed class ChampSelectServiceTests : IDisposable
             gameData = new { isCustomGame = false, queue = new { id = 400, gameMode, description = "Normal Draft" } },
         });
         host.Client.SetGet("/lol-champ-select/v1/pickable-champion-ids", new[] { Ahri, Orianna });
-        host.Client.SetGet("/lol-champ-select/v1/bannable-champion-ids", new[] { Ahri, Orianna, Yasuo });
+        // The real client answers this with a single placeholder entry during planning; LockIn must not trust it.
+        host.Client.SetGet("/lol-champ-select/v1/bannable-champion-ids", PlaceholderBannable);
         return host;
+    }
+
+    private static object BanAction(int id = 0, int championId = 0, bool completed = false, bool inProgress = true) => new
+    {
+        id, actorCellId = Me, type = "ban", isAllyAction = true, isInProgress = inProgress, completed, championId,
+    };
+
+    private const string BanActionPath = "/lol-champ-select/v1/session/actions/0";
+    private static readonly int[] PlaceholderBannable = [0];
+
+    /// <summary>Your last ranked game: the ban was never made because the bannable list looked like [one entry].</summary>
+    [Fact]
+    public async Task Bans_from_the_list_even_though_the_client_reports_a_placeholder_bannable_list()
+    {
+        await using var host = await StartAsync(s => s.Bans.HoverDelaySeconds = 0);
+
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, Session(20_000, [BanAction(), PickAction(inProgress: false)]));
+
+        await host.WaitUntilAsync(
+            () => host.Client.RequestsTo("PATCH", BanActionPath).Any(r => r.Json.GetProperty("championId").GetInt32() == Yasuo),
+            "hover Yasuo for the ban");
+        Assert.DoesNotContain(host.Logs.Messages, m => m.Contains("can't be banned", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Waits_for_the_ban_phase_before_acting_on_the_ban()
+    {
+        await using var host = await StartAsync(s => s.Bans.HoverDelaySeconds = 0);
+
+        // The real client already calls the ban "in progress" during planning, here with the timer almost out.
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, Session(2_500, [BanAction(), PickAction(inProgress: false)], phase: "PLANNING"));
+        await host.WaitUntilAsync(
+            () => host.Logs.Messages.Any(m => m.Contains("Planning: will ban Yasuo when the ban phase starts", StringComparison.Ordinal)),
+            "plan the ban");
+        await Task.Delay(800);
+        Assert.Empty(host.Client.RequestsTo("PATCH", BanActionPath));
+
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, Session(25_000, [BanAction(), PickAction(inProgress: false)]));
+
+        await host.WaitUntilAsync(() => host.Client.RequestsTo("PATCH", BanActionPath).Any(), "hover once the ban phase starts");
+    }
+
+    [Fact]
+    public async Task Moves_on_to_the_next_ban_when_the_client_keeps_refusing_one()
+    {
+        const int Zed = 238;
+        await using var host = await StartAsync(s =>
+        {
+            s.Bans.HoverDelaySeconds = 0;
+            s.Bans.Lists[Role.Any] = [Yasuo, Zed];
+        });
+        host.Client.Reject = r => r.Path == BanActionPath && r.Body.Contains("\"championId\":157", StringComparison.Ordinal) ? "Champion unavailable" : null;
+
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, Session(20_000, [BanAction(), PickAction(inProgress: false)]));
+
+        await host.WaitUntilAsync(
+            () => host.Client.RequestsTo("PATCH", BanActionPath).Any(r => r.Json.GetProperty("championId").GetInt32() == Zed),
+            "move on to Zed", timeoutMs: 8000);
+        Assert.Equal(2, host.Client.RequestsTo("PATCH", BanActionPath).Count(r => r.Json.GetProperty("championId").GetInt32() == Yasuo));
+        Assert.Contains(host.Logs.Messages, m => m.Contains("keeps refusing Yasuo", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_phone_ban_override_works_during_the_ban_phase()
+    {
+        await using var host = await StartAsync(s => s.Bans.HoverDelaySeconds = 0);
+        await host.Client.PushAsync(LcuEndpoints.ChampSelectSession, Session(20_000, [BanAction(), PickAction(inProgress: false)]));
+        var service = host.Host.Services.GetRequiredService<ChampSelectService>();
+        await host.WaitUntilAsync(() => service.View is not null, "see champ select");
+
+        Assert.Null(await service.SetOverrideAsync(ChampSelectService.Ban, Orianna));
+
+        await host.WaitUntilAsync(
+            () => host.Client.RequestsTo("PATCH", BanActionPath).Any(r => r.Json.GetProperty("championId").GetInt32() == Orianna),
+            "ban the overridden champion");
+        Assert.Equal(ChoiceSource.Override, service.View!.PlannedBan!.Source);
     }
 
     private static object Session(long leftMs, object[] actions, string phase = "BAN_PICK", long gameId = 1) => new

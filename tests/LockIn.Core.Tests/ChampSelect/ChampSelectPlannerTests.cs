@@ -65,7 +65,7 @@ public class ChampSelectPlannerTests
 
     private static ChampSelectPlan Plan(ChampSelectSession session, ChampSelectOptions? options = null, ChampSelectMemory? memory = null,
         IReadOnlySet<int>? playable = null) =>
-        ChampSelectPlanner.Plan(session, options ?? Options(), memory ?? new ChampSelectMemory(), Now, playable, null, id => Names[id]);
+        ChampSelectPlanner.Plan(session, options ?? Options(), memory ?? new ChampSelectMemory(), Now, playable, id => Names[id]);
 
     // ── Picking ─────────────────────────────────────────────────────────
 

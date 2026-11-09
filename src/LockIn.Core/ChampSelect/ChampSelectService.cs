@@ -29,6 +29,7 @@ public sealed class ChampSelectService(
     private const int MaxRecentDecisions = 12;
     private static readonly TimeSpan Tick = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan RetryAfterFailure = TimeSpan.FromSeconds(1);
+    private const int RefusalsBeforeGivingUp = 2;
 
     private readonly Channel<Message> _inbox = Channel.CreateUnbounded<Message>(new UnboundedChannelOptions { SingleReader = true });
     private readonly Lock _recentGate = new();
@@ -42,8 +43,8 @@ public sealed class ChampSelectService(
     private readonly Dictionary<string, string> _lastNotes = [];
     private readonly Dictionary<int, long> _retryAt = [];
     private readonly HashSet<int> _announced = [];
+    private readonly Dictionary<(int ActionId, int ChampionId), int> _refusals = [];
     private IReadOnlySet<int>? _pickable;
-    private HashSet<int>? _bannable;
     private bool _automate;
     private string? _notAutomatedReason;
     private string? _queue;
@@ -413,13 +414,13 @@ public sealed class ChampSelectService(
 
         try
         {
+            // Deliberately not reading "bannable-champion-ids": during planning the real client answers with a
+            // single placeholder entry, which made every champion on the ban lists look unbannable. If the
+            // client does turn a ban down, the refusal handling in ExecuteAsync moves on to the next champion.
             var pickable = await client.GetAsync<int[]>("lol-champ-select/v1/pickable-champion-ids", stoppingToken).ConfigureAwait(false);
-            var bannable = await client.GetAsync<int[]>("lol-champ-select/v1/bannable-champion-ids", stoppingToken).ConfigureAwait(false);
             _pickable = pickable is { Length: > 0 } ? pickable.ToHashSet() : null;
-            _bannable = bannable is { Length: > 0 } ? bannable.ToHashSet() : null;
-            logger.LogDebug("Pickable champions: {Pickable}, bannable: {Bannable}",
-                _pickable?.Count.ToString(CultureInfo.InvariantCulture) ?? "unknown",
-                _bannable?.Count.ToString(CultureInfo.InvariantCulture) ?? "unknown");
+            logger.LogDebug("Pickable champions: {Pickable}",
+                _pickable?.Count.ToString(CultureInfo.InvariantCulture) ?? "unknown");
         }
         catch (LcuRequestException ex)
         {
@@ -442,6 +443,11 @@ public sealed class ChampSelectService(
         var now = time.GetUtcNow().ToUnixTimeMilliseconds();
         foreach (var action in MyActions(session).Where(a => a.IsInProgress))
         {
+            if (action.Type == Ban && session.Timer.Phase == ChampSelectTimer.Planning)
+            {
+                continue; // The client reports the ban as in progress during planning, but it can't be acted on yet.
+            }
+
             _memory.FirstSeenInProgress.TryAdd(action.Id, now);
             if (action.Type == Pick && !_pickableRefreshedForTurn)
             {
@@ -452,7 +458,7 @@ public sealed class ChampSelectService(
         }
 
         var options = ChampSelectOptions.From(s) with { PickOverride = _pickOverride, BanOverride = _banOverride };
-        var plan = ChampSelectPlanner.Plan(session, options, _memory, now, _pickable, _bannable, catalog.NameOf);
+        var plan = ChampSelectPlanner.Plan(session, options, _memory, now, _pickable, catalog.NameOf);
         _lastPlan = plan;
 
         foreach (var note in plan.Notes)
@@ -512,11 +518,40 @@ public sealed class ChampSelectService(
             }
 
             _retryAt.Remove(command.ActionId);
+            _refusals.Remove((command.ActionId, command.ChampionId));
         }
         catch (LcuRequestException ex)
         {
             logger.LogWarning("Couldn't do that: {Message}. Retrying in a moment.", ex.Message);
             _retryAt[command.ActionId] = now + (long)RetryAfterFailure.TotalMilliseconds;
+            NoteRefusal(command);
+        }
+    }
+
+    /// <summary>
+    /// After the client turns down the same champion twice for the same action, stop trying it and move on to the
+    /// next one on the list, instead of retrying the same request until the timer runs out.
+    /// </summary>
+    private void NoteRefusal(ChampSelectCommand command)
+    {
+        if (command.Kind == ChampSelectCommandKind.DeclareIntent
+            || _session?.AllActions.FirstOrDefault(a => a.Id == command.ActionId) is not { } action)
+        {
+            return;
+        }
+
+        var key = (command.ActionId, command.ChampionId);
+        var count = _refusals.GetValueOrDefault(key) + 1;
+        _refusals[key] = count;
+        if (count < RefusalsBeforeGivingUp)
+        {
+            return;
+        }
+
+        var refused = action.Type == Ban ? _memory.RefusedBans : _memory.RefusedPicks;
+        if (refused.Add(command.ChampionId))
+        {
+            Decide($"The League client keeps refusing {catalog.NameOf(command.ChampionId)} for your {action.Type} — trying the next one");
         }
     }
 
@@ -584,8 +619,8 @@ public sealed class ChampSelectService(
         _lastNotes.Clear();
         _retryAt.Clear();
         _announced.Clear();
+        _refusals.Clear();
         _pickable = null;
-        _bannable = null;
         _automate = false;
         _notAutomatedReason = null;
         _queue = null;
