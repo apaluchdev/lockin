@@ -28,8 +28,11 @@ downloads the champion list and icons from Riot's public Data Dragon CDN.
 
 ## Install & use
 
-1. Build the exe (see below) or grab `LockIn.exe`. It's a single file and doesn't need .NET installed.
-2. Run it and set up your **Picks**, **Bans**, and **Runes & spells** tabs. Everything saves automatically.
+1. Download the `.msi` from the [Releases](https://github.com/apaluchdev/lockin/releases) page and run it.
+   It installs for your Windows user only, needs no administrator rights or .NET install, and adds LockIn
+   to the Start menu. The installer isn't code-signed, so Windows SmartScreen may warn you: choose
+   **More info → Run anyway**.
+2. Open LockIn and set up your **Picks**, **Bans**, and **Runes & spells** tabs. Everything saves automatically.
 3. Leave it running in the tray while you play. The status bar shows the connection and the current phase.
 
 | What | Where |
@@ -69,6 +72,12 @@ Single self-contained `artifacts\LockIn.exe` (runs the tests first):
 ./tools/publish.ps1
 ```
 
+Installer in `artifacts\installer` (runs the tests and publishes first):
+
+```powershell
+./tools/build-installer.ps1
+```
+
 ### Try it without playing
 
 `tools/LockIn.FakeClient` pretends to be the League client and plays a scripted ranked champ select:
@@ -89,6 +98,10 @@ When developing the phone page, set `LOCKIN_REMOTE_LOOPBACK=1` so LockIn listens
 | `tools/` | Fake client demo, publish script, icon generator |
 
 Package versions are managed centrally in `Directory.Packages.props`.
+
+## License
+
+[MIT](LICENSE): free for anyone to use, change and share, for any purpose.
 
 ## Acknowledgements
 

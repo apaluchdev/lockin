@@ -1,0 +1,46 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <!-- Installs for the current user only, so no administrator rights are needed.
+       Keep UpgradeCode the same forever: it's how a new version replaces an old one. -->
+  <Package Name="LockIn"
+           Manufacturer="apaluchdev"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="84DD441A-B93B-471D-8B7F-CE05751C508D"
+           Scope="perUser"
+           Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of LockIn is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="LockIn.ico" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="LockIn.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/apaluchdev/lockin" />
+
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+    <ui:WixUI Id="WixUI_Minimal" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="UserProgramsDir" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="LockIn" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main">
+      <Component Id="LockInApp" Directory="INSTALLFOLDER" Guid="3F6B1C52-7E0A-4A0F-9B2D-6C1E8D4A7F31">
+        <File Id="LockInExe" Source="$(var.ExePath)" Name="LockIn.exe" KeyPath="no" />
+        <Shortcut Id="StartMenuShortcut"
+                  Directory="ProgramMenuFolder"
+                  Name="LockIn"
+                  Description="League of Legends champ select assistant"
+                  Target="[#LockInExe]"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="LockIn.ico" />
+        <RegistryValue Root="HKCU" Key="Software\LockIn" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+        <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+        <RemoveFolder Id="RemoveUserProgramsDir" Directory="UserProgramsDir" On="uninstall" />
+      </Component>
+    </Feature>
+  </Package>
+</Wix>

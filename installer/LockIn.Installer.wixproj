@@ -1,0 +1,17 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+
+  <!-- Per-user MSI around the single-file LockIn.exe. Build it with tools/build-installer.ps1. -->
+  <PropertyGroup>
+    <OutputName>LockIn-$(Version)-win-x64</OutputName>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <OutputPath>..\artifacts\installer\</OutputPath>
+    <!-- ICE91 warns that per-user folders won't serve an all-users install; this package is per-user only. -->
+    <SuppressIces>ICE91</SuppressIces>
+    <DefineConstants>ProductVersion=$(Version);ExePath=..\artifacts\LockIn.exe;IconPath=..\src\LockIn.App\Assets\lockin.ico</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" />
+  </ItemGroup>
+
+</Project>
